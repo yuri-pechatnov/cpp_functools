@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import argparse
+
+def root_path():
+    return os.path.dirname(os.path.realpath(__file__))
+
+def real_path(path_from_root):
+    return os.path.join(root_path(), path_from_root)
+
+def safe_shell_run(cmd):
+    print(cmd)
+    assert(0 == os.system(cmd))
+
+def build_path():
+    return real_path("build")
+
+def gtest_include_path():
+    return real_path("googletest/googletest/include")
+
+def gtest_static_lib_path():
+    return real_path("build/libgtest.a")
+
+def jsoncpp_include_path():
+    return real_path("googletest/googletest/include")
+
+def gcc_cmd(includes):
+    return "g++ -std=c++17 -isystem -pthread " + " ".join("-I" + i for i in includes)
+
+def clear(args):
+    safe_shell_run("rm -rf build googletest jsoncpp")
+
+def init(args):
+    if not os.path.exists(build_path()):
+        os.mkdir(build_path())
+    gtest_path = real_path("googletest")
+    if not os.path.exists(gtest_path):
+        safe_shell_run("git clone https://github.com/google/googletest.git")
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("googletest/googletest")]) +
+                       " -c " + real_path("googletest/googletest/src/gtest-all.cc") +
+                       " -o " + real_path("build/gtest-all.o"))
+        safe_shell_run(f"ar -rv {gtest_static_lib_path()} build/gtest-all.o")
+
+    jsoncpp_path = os.path.join(root_path(), "jsoncpp")
+    if not os.path.exists(jsoncpp_path):
+        assert(0 == os.system("git clone https://github.com/open-source-parsers/jsoncpp.git"))
+
+
+def run_test(args):
+    print(args)
+    init(args)
+    if len(args.functools_realisations) == 0:
+        args.functools_realisations = os.listdir(real_path("functools/realisations"))
+    for realisation in args.functools_realisations:
+        realisation_include = real_path(f"functools/realisations/{realisation}")
+        test_source = real_path("functools/test/functools_test.cpp")
+        test_binary = real_path(f"build/test_{realisation}")
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("functools/util"), realisation_include]) +
+                       f" {gtest_static_lib_path()} " +
+                       test_source +
+                       " -o " + test_binary)
+        safe_shell_run(test_binary)
+
+
+def run_bench(args):
+    print(args)
+    init(args)
+    if len(args.functools_realisations) == 0:
+        args.functools_realisations = os.listdir(real_path("functools/realisations"))
+    for realisation in args.functools_realisations:
+        realisation_include = real_path(f"functools/realisations/{realisation}")
+        bench_source = real_path("functools/bench/bench.cpp")
+        bench_binary = real_path(f"build/bench_{realisation}")
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
+                       f" {gtest_static_lib_path()} " +
+                       bench_source +
+                       " -o " + bench_binary)
+        safe_shell_run(bench_binary)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("Iurii Pechatnov's diploma cli")
+    subparsers = parser.add_subparsers()
+
+    parser_init = subparsers.add_parser('init')
+    parser_init.set_defaults(func=init)
+
+    parser_init = subparsers.add_parser('clear')
+    parser_init.set_defaults(func=clear)
+
+    parser_test = subparsers.add_parser('test')
+    parser_test.add_argument('functools_realisations', nargs='*', default=[], type=str)
+    parser_test.set_defaults(func=run_test)
+
+    parser_bench = subparsers.add_parser('bench')
+    parser_bench.add_argument('functools_realisations', nargs='*', default=[], type=str)
+    parser_bench.set_defaults(func=run_bench)
+
+    args = parser.parse_args()
+    args.func(args)
+
