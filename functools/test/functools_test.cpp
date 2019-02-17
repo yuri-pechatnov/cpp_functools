@@ -15,6 +15,7 @@ protected:
 	}
 };
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Enumerate) {
     std::vector a = {1, 2, 4};
     std::vector<int> b;
@@ -35,7 +36,9 @@ TEST_F(TestFunctools, Enumerate) {
     }
     ASSERT_TRUE((d == std::vector{0, 1, 2}));
 }
+#endif
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, EnumerateTemporary) {
     std::vector a = {1, 2, 4};
     std::vector<int> b;
@@ -54,25 +57,40 @@ TEST_F(TestFunctools, EnumerateTemporary) {
         ASSERT_EQ(i + 1, x);
     }
 }
+#endif
 
 TEST_F(TestFunctools, Zip) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
+#if !defined(boost_range_REALISATION)
         {{1, 2, 3}, {4, 5, 6, 7}},
         {{1, 2, 3, 4}, {4, 5, 6}},
         {{1, 2, 3, 4}, {}},
+#endif
     };
 
     for (auto [a, b] : ts) {
         int k = 0;
+#if !defined(boost_range_REALISATION)
         for (const auto& [i, j] : Zip(a, b)) {
             ASSERT_EQ(++k, i);
             ASSERT_EQ(i + 3, j);
         }
+#else
+        auto zipResult = Zip(a, b);
+        for (const auto t : zipResult) {
+            int32_t i, j;
+            boost::tie(i, j) = t;
+            ASSERT_EQ(++k, i);
+            ASSERT_EQ(i + 3, j);
+        }
+#endif
         ASSERT_EQ(k, std::min(a.size(), b.size()));
     }
 }
 
+
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, ZipReference) {
     std::vector a = {0, 1, 2};
     std::vector b = {2, 1, 0, -1};
@@ -81,7 +99,9 @@ TEST_F(TestFunctools, ZipReference) {
     }
     ASSERT_TRUE((a == std::vector{2, 1, 0}));
 }
+#endif
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Zip3) {
     std::vector<std::tuple<std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}, {11, 3}},
@@ -105,6 +125,7 @@ TEST_F(TestFunctools, Zip3) {
         ASSERT_EQ(e, f);
     }
 }
+#endif
 
 TEST_F(TestFunctools, Filter) {
     std::vector<std::vector<int32_t>> ts = {
@@ -174,6 +195,7 @@ TEST_F(TestFunctools, Map) {
     ASSERT_EQ(roundedFloats, resFloat);
 }
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, CartesianProduct) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
@@ -209,7 +231,9 @@ TEST_F(TestFunctools, CartesianProduct) {
         ASSERT_EQ(g[1], h);
     }
 }
+#endif
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, CartesianProduct3) {
     std::vector<std::tuple<std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}, {11, 3}},
@@ -237,7 +261,9 @@ TEST_F(TestFunctools, CartesianProduct3) {
         ASSERT_EQ(e, f);
     }
 }
+#endif
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Concatenate2) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
@@ -273,7 +299,10 @@ TEST_F(TestFunctools, Concatenate2) {
         ASSERT_EQ(c, (std::vector<int32_t>{1, 2, 3, 4, 5, 6}));
     }
 }
+#endif
 
+
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Flatten) {
     {
         std::vector <int> a = {1, 2, 3};
@@ -303,7 +332,9 @@ TEST_F(TestFunctools, Flatten) {
         ASSERT_EQ(a, b);
     }
 }
+#endif
 
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Combo) {
     for (auto [i, j] : Enumerate(Range(10))) {
         ASSERT_EQ(i, j);
@@ -369,8 +400,9 @@ TEST_F(TestFunctools, Combo) {
         ASSERT_TRUE(check(std::vector{5, 3, 4, 3 ,5}));
     }
 }
+#endif
 
-
+#if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, CopyIterator) {
     std::vector a = {1, 2, 3, 4};
     std::vector b = {4, 5, 6, 7};
@@ -448,6 +480,7 @@ TEST_F(TestFunctools, CopyIterator) {
             });
     }
 }
+#endif
 
 
 

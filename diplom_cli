@@ -1,11 +1,26 @@
 #!/usr/bin/env python3
 
-import os
-import sys
 import argparse
+import json
+import os
+import subprocess
+import sys
+from collections import defaultdict
+
+from contextlib import contextmanager
 
 def root_path():
     return os.path.dirname(os.path.realpath(__file__))
+
+@contextmanager
+def work_in_root_path():
+    old_pwd = os.getcwd()
+    try:
+        os.chdir(root_path())
+        yield "Working in root path"
+    finally:
+        os.chdir(old_pwd)
+
 
 def real_path(path_from_root):
     return os.path.join(root_path(), path_from_root)
@@ -24,29 +39,57 @@ def gtest_static_lib_path():
     return real_path("build/libgtest.a")
 
 def jsoncpp_include_path():
-    return real_path("googletest/googletest/include")
+    return real_path("jsoncpp/include")
+
+def jsoncpp_static_lib_path():
+    return real_path("build/jsoncpp/src/lib_json/libjsoncpp.a")
+
+def boost_range_include_path():
+    return real_path("boost")
+
 
 def gcc_cmd(includes):
     return "g++ -std=c++17 -isystem -pthread " + " ".join("-I" + i for i in includes)
 
 def clear(args):
-    safe_shell_run("rm -rf build googletest jsoncpp")
+    with work_in_root_path():
+        safe_shell_run("rm -rf build googletest jsoncpp")
 
 def init(args):
-    if not os.path.exists(build_path()):
-        os.mkdir(build_path())
-    gtest_path = real_path("googletest")
-    if not os.path.exists(gtest_path):
-        safe_shell_run("git clone https://github.com/google/googletest.git")
-        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("googletest/googletest")]) +
-                       " -c " + real_path("googletest/googletest/src/gtest-all.cc") +
-                       " -o " + real_path("build/gtest-all.o"))
-        safe_shell_run(f"ar -rv {gtest_static_lib_path()} build/gtest-all.o")
+    with work_in_root_path():
+        if not os.path.exists(build_path()):
+            os.mkdir(build_path())
 
-    jsoncpp_path = os.path.join(root_path(), "jsoncpp")
-    if not os.path.exists(jsoncpp_path):
-        assert(0 == os.system("git clone https://github.com/open-source-parsers/jsoncpp.git"))
+    with work_in_root_path():
+        gtest_path = real_path("googletest")
+        if not os.path.exists(gtest_path):
+            safe_shell_run("git clone https://github.com/google/googletest.git")
+            safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("googletest/googletest")]) +
+                           " -c " + real_path("googletest/googletest/src/gtest-all.cc") +
+                           " -o " + real_path("build/gtest-all.o"))
+            safe_shell_run(f"ar -rv {gtest_static_lib_path()} build/gtest-all.o")
 
+    with work_in_root_path():
+        jsoncpp_path = os.path.join(root_path(), "jsoncpp")
+        if not os.path.exists(jsoncpp_path):
+            assert(0 == os.system("git clone https://github.com/open-source-parsers/jsoncpp.git"))
+            build_dir = os.path.join(build_path(), "jsoncpp")
+            os.mkdir(build_dir)
+            os.chdir(build_dir)
+            safe_shell_run(
+                'cmake ' +
+                '-DCMAKE_BUILD_TYPE=debug -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF ' +
+                '-DARCHIVE_INSTALL_DIR=. -G "Unix Makefiles" ' + jsoncpp_path
+            )
+            safe_shell_run('make')
+
+    with work_in_root_path():
+        boost_range_path = real_path("range")
+        if not os.path.exists(boost_range_path):
+            safe_shell_run("git clone --recursive https://github.com/boostorg/boost.git")
+            os.chdir("boost")
+            safe_shell_run("./bootstrap.sh --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --with-libraries=all")
+            safe_shell_run("./b2 --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --build-dir=../build/boost-build")
 
 def run_test(args):
     print(args)
@@ -57,8 +100,9 @@ def run_test(args):
         realisation_include = real_path(f"functools/realisations/{realisation}")
         test_source = real_path("functools/test/functools_test.cpp")
         test_binary = real_path(f"build/test_{realisation}")
-        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("functools/util"), realisation_include]) +
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), real_path("functools/util"), realisation_include]) +
                        f" {gtest_static_lib_path()} " +
+                       f" -D{realisation}_REALISATION " +
                        test_source +
                        " -o " + test_binary)
         safe_shell_run(test_binary)
@@ -69,15 +113,39 @@ def run_bench(args):
     init(args)
     if len(args.functools_realisations) == 0:
         args.functools_realisations = os.listdir(real_path("functools/realisations"))
-    for realisation in args.functools_realisations:
+    bench_result = []
+
+    def run_one_bench(realisation, bench_type, store_key, optimize_level=2):
         realisation_include = real_path(f"functools/realisations/{realisation}")
         bench_source = real_path("functools/bench/bench.cpp")
         bench_binary = real_path(f"build/bench_{realisation}")
-        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
-                       f" {gtest_static_lib_path()} " +
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
+                       f" -O{optimize_level} " +
+                       f" -D{bench_type} " +
+                       f" -D{realisation}_REALISATION " +
+                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                        bench_source +
                        " -o " + bench_binary)
-        safe_shell_run(bench_binary)
+        one_result = json.loads(subprocess.check_output(bench_binary, shell=True))
+        one_result.update({
+            "Realisation": store_key,
+            "OptimizeLevel": optimize_level,
+        })
+        bench_result.append(one_result)
+
+    for optimize_level in [2, 3]:
+        for realisation in args.functools_realisations:
+            run_one_bench(realisation, "USE_FUNCTOOLS", realisation, optimize_level)
+        run_one_bench(args.functools_realisations[0], "USE_NATIVE", "native", optimize_level)
+
+
+    print(json.dumps(bench_result, indent=4, sort_keys=True))
+    result_hashes = defaultdict(list)
+    for br in bench_result:
+        for b_name, b_result in br["Benchmarks"].items():
+            result_hashes[b_name].append(b_result["ResultHash"])
+    for b_name, hashes in result_hashes.items():
+        assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
 
 
 if __name__ == "__main__":
