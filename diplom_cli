@@ -2,12 +2,15 @@
 
 import argparse
 import json
+import logging
 import os
+import re
 import subprocess
 import sys
-from collections import defaultdict
 
+from collections import defaultdict
 from contextlib import contextmanager
+
 
 def root_path():
     return os.path.dirname(os.path.realpath(__file__))
@@ -26,7 +29,7 @@ def real_path(path_from_root):
     return os.path.join(root_path(), path_from_root)
 
 def safe_shell_run(cmd):
-    print(cmd)
+    logging.info("exec: %s", cmd)
     assert(0 == os.system(cmd))
 
 def build_path():
@@ -51,11 +54,11 @@ def boost_range_include_path():
 def gcc_cmd(includes):
     return "g++ -std=c++17 -isystem -pthread " + " ".join("-I" + i for i in includes)
 
-def clear(args):
+def clear(**other_args):
     with work_in_root_path():
         safe_shell_run("rm -rf build googletest jsoncpp")
 
-def init(args):
+def init(**other_args):
     with work_in_root_path():
         if not os.path.exists(build_path()):
             os.mkdir(build_path())
@@ -91,12 +94,12 @@ def init(args):
             safe_shell_run("./bootstrap.sh --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --with-libraries=all")
             safe_shell_run("./b2 --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --build-dir=../build/boost-build")
 
-def run_test(args):
-    print(args)
-    init(args)
-    if len(args.functools_realisations) == 0:
-        args.functools_realisations = os.listdir(real_path("functools/realisations"))
-    for realisation in args.functools_realisations:
+def run_test(functools_realisations, **other_args):
+    logging.info("run_test: %s", locals())
+    init()
+    if len(functools_realisations) == 0:
+        functools_realisations = os.listdir(real_path("functools/realisations"))
+    for realisation in functools_realisations:
         realisation_include = real_path(f"functools/realisations/{realisation}")
         test_source = real_path("functools/test/functools_test.cpp")
         test_binary = real_path(f"build/test_{realisation}")
@@ -108,11 +111,11 @@ def run_test(args):
         safe_shell_run(test_binary)
 
 
-def run_bench(args):
-    print(args)
-    init(args)
-    if len(args.functools_realisations) == 0:
-        args.functools_realisations = os.listdir(real_path("functools/realisations"))
+def run_bench(functools_realisations, **other_args):
+    logging.info("run_bench: %s", locals())
+    init()
+    if len(functools_realisations) == 0:
+        functools_realisations = os.listdir(real_path("functools/realisations"))
     bench_result = []
 
     def run_one_bench(realisation, bench_type, store_key, optimize_level=2):
@@ -134,37 +137,125 @@ def run_bench(args):
         bench_result.append(one_result)
 
     for optimize_level in [2, 3]:
-        for realisation in args.functools_realisations:
+        for realisation in functools_realisations:
             run_one_bench(realisation, "USE_FUNCTOOLS", realisation, optimize_level)
-        run_one_bench(args.functools_realisations[0], "USE_NATIVE", "native", optimize_level)
+        run_one_bench(functools_realisations[0], "USE_NATIVE", "native", optimize_level)
+
+
+    #~ print(json.dumps(bench_result, indent=4, sort_keys=True))
+    #~ result_hashes = defaultdict(list)
+    #~ for br in bench_result:
+        #~ for b_name, b_result in br["Benchmarks"].items():
+            #~ result_hashes[b_name].append(b_result["ResultHash"])
+    #~ for b_name, hashes in result_hashes.items():
+        #~ assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
+
+
+def run_compile_bench(functools_realisations, benchmarks, **other_args):
+    logging.info("run_compile_bench: %s", locals())
+    init()
+    if len(functools_realisations) == 0:
+        functools_realisations = os.listdir(real_path("functools/realisations"))
+    bench_source = real_path("functools/compile_bench/compile_bench.cpp")
+    if len(benchmarks) == 0:
+        with open(bench_source) as f:
+            benchmarks = re.findall(r"\W(\w*)_BENCH", f.read())
+
+    logging.info("Realisations: %s, benchmarks: %s", functools_realisations, benchmarks)
+
+    def test_time_cmd(time_cmd):
+        #~ subprocess.check_output(f"{time_cmd} -f '' echo 1  2>&1 > /dev/null")
+        try:
+            subprocess.check_output(f"{time_cmd} -f '' echo 1  2>&1 > /dev/null", shell=True, stderr=subprocess.STDOUT)
+            return True
+        except:
+            return False
+
+
+    time_command = "time"
+    if not test_time_cmd(time_command):
+        time_command = "gtime" # on MacOS: brew install gnu-time
+    assert test_time_cmd(time_command), "No proper command time or gtime in shell"
+    logging.info(f"Use time-command: {time_command}")
+    time_format = '{"real_time":%e, "exit_code":%x, "user_time":%U,"system_time":%S}'
+
+    bench_result = []
+
+    def run_one_bench(realisation, bench, bench_type, store_key, optimize_level=2):
+        realisation_include = real_path(f"functools/realisations/{realisation}")
+        bench_result_report = real_path(f"build/compile_bench_{realisation}.report")
+        bench_result_lib = real_path(f"build/compile_bench_{realisation}.o")
+        try:
+            _ = subprocess.check_output(
+                f"{time_command} --quiet -f '{time_format}' -o {bench_result_report} " +
+                gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
+                f" -O{optimize_level} " +
+                f" -D{bench_type} " +
+                f" -D{realisation}_REALISATION " +
+                f" -D{bench}_BENCH " +
+                f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
+                " -c " +
+                bench_source +
+                " -o " + bench_result_lib,
+                shell=True,
+                stderr=subprocess.STDOUT,
+            )
+            with open(bench_result_report) as f:
+                one_result = f.read()
+            one_result = json.loads(one_result)
+        except subprocess.CalledProcessError as e:
+            one_result = {
+                "exit_code": e.returncode
+            }
+        one_result.update({
+            "Realisation": store_key,
+            "Bench": bench,
+            "OptimizeLevel": optimize_level,
+            "BinarySize": os.stat(bench_result_lib).st_size if one_result["exit_code"] == 0 else None,
+        })
+        print(json.dumps(one_result))
+        bench_result.append(one_result)
+
+    for optimize_level in [2, 3]:
+        for bench in benchmarks:
+            for realisation in functools_realisations:
+                run_one_bench(realisation, bench, "USE_FUNCTOOLS", realisation, optimize_level)
+            run_one_bench(functools_realisations[0], bench, "USE_NATIVE", "native", optimize_level)
 
 
     print(json.dumps(bench_result, indent=4, sort_keys=True))
-    result_hashes = defaultdict(list)
-    for br in bench_result:
-        for b_name, b_result in br["Benchmarks"].items():
-            result_hashes[b_name].append(b_result["ResultHash"])
-    for b_name, hashes in result_hashes.items():
-        assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
-
+    #~ result_hashes = defaultdict(list)
+    #~ for br in bench_result:
+        #~ for b_name, b_result in br["Benchmarks"].items():
+            #~ result_hashes[b_name].append(b_result["ResultHash"])
+    #~ for b_name, hashes in result_hashes.items():
+        #~ assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
 
 if __name__ == "__main__":
+    logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
+                        level=logging.INFO)
+
     parser = argparse.ArgumentParser("Iurii Pechatnov's diploma cli")
     subparsers = parser.add_subparsers()
 
     parser_init = subparsers.add_parser('init')
-    parser_init.set_defaults(func=init)
+    parser_init.set_defaults(func=lambda x: init(**x.__dict__))
 
     parser_init = subparsers.add_parser('clear')
-    parser_init.set_defaults(func=clear)
+    parser_init.set_defaults(func=lambda x: clear(**x.__dict__))
 
     parser_test = subparsers.add_parser('test')
     parser_test.add_argument('functools_realisations', nargs='*', default=[], type=str)
-    parser_test.set_defaults(func=run_test)
+    parser_test.set_defaults(func=lambda x: run_test(**x.__dict__))
 
     parser_bench = subparsers.add_parser('bench')
     parser_bench.add_argument('functools_realisations', nargs='*', default=[], type=str)
-    parser_bench.set_defaults(func=run_bench)
+    parser_bench.set_defaults(func=lambda x: run_bench(**x.__dict__))
+
+    parser_compile_bench = subparsers.add_parser('compile_bench')
+    parser_compile_bench.add_argument('functools_realisations', nargs='*', default=[], type=str)
+    parser_compile_bench.add_argument('benchmarks', nargs='*', default=[], type=str)
+    parser_compile_bench.set_defaults(func=lambda x: run_compile_bench(**x.__dict__))
 
     args = parser.parse_args()
     args.func(args)
