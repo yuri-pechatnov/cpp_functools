@@ -1,23 +1,20 @@
-#ifdef USE_FUNCTOOLS
-    #include <functools.h>
-
-    using namespace NFuncTools;
-#endif
-
+#include <functools.h>
 #include <vector>
 
 
+#if !defined(native_REALISATION)
+using namespace NFuncTools;
+#endif
 
 
 #if defined(BenchEnumerate_BENCH)
 int BenchEnumerate(const std::vector<int>& a) {
     int res = 0;
-    #ifdef USE_FUNCTOOLS
+    #if !defined(native_REALISATION)
         for (auto [j, aj] : Enumerate(a)) {
             res += j * aj;
         }
-    #endif
-    #ifdef USE_NATIVE
+    #else
         for (size_t j = 0; j < a.size(); ++j) {
             res += j * a[j];
         }
@@ -29,7 +26,7 @@ int BenchEnumerate(const std::vector<int>& a) {
 #if defined(BenchZip_BENCH)
 int BenchZip(const std::vector<int>& a, const std::vector<int>& b) {
     int res = 0;
-    #ifdef USE_FUNCTOOLS
+    #if !defined(native_REALISATION)
         #if !defined(boost_range_REALISATION)
             for (auto [aj, bj] : Zip(a, b)) {
                 res += aj * bj;
@@ -41,8 +38,7 @@ int BenchZip(const std::vector<int>& a, const std::vector<int>& b) {
                 res += aj * bj;
             }
         #endif
-    #endif
-    #ifdef USE_NATIVE
+    #else
         for (size_t j = 0; j < a.size() && j < b.size(); ++j) {
             res += a[j] * b[j];
         }
@@ -57,12 +53,11 @@ int BenchFilter(const std::vector<int>& a) {
     auto pred = [](auto x) {
         return bool(x & 1);
     };
-    #ifdef USE_FUNCTOOLS
+    #if !defined(native_REALISATION)
         for (auto aj : Filter(pred, a)) {
             res += aj;
         }
-    #endif
-    #ifdef USE_NATIVE
+    #else
         for (size_t j = 0; j < a.size(); ++j) {
             if (a[j] & 1) {
                 res += a[j];
@@ -76,12 +71,11 @@ int BenchFilter(const std::vector<int>& a) {
 #if defined(BenchCartesianProduct_BENCH)
 int BenchCartesianProduct(const std::vector<int>& a, const std::vector<int>& b) {
     int res = 0;
-    #ifdef USE_FUNCTOOLS
+    #if !defined(native_REALISATION)
         for (auto [aj, bj] : CartesianProduct(a, b)) {
             res += aj * bj;
         }
-    #endif
-    #ifdef USE_NATIVE
+    #else
         for (size_t j = 0; j < a.size(); ++j) {
             for (size_t k = 0; k < b.size(); ++k) {
                 res += a[j] * b[k];
@@ -96,12 +90,11 @@ int BenchCartesianProduct(const std::vector<int>& a, const std::vector<int>& b) 
 #if defined(BenchConcatenate_BENCH)
 int BenchConcatenate(const std::vector<int>& a, const std::vector<int>& b) {
     int res = 0;
-    #ifdef USE_FUNCTOOLS
+    #if !defined(native_REALISATION)
         for (auto x : Concatenate(a, b)) {
             res += x;
         }
-    #endif
-    #ifdef USE_NATIVE
+    #else
         for (size_t j = 0; j < a.size(); ++j) {
             res += a[j];
         }

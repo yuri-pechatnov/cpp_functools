@@ -10,7 +10,9 @@
 #include <string>
 #include <sstream>
 
+#if !defined(native_REALISATION)
 using namespace NFuncTools;
+#endif
 
 struct TResources {
     double UserProcessorTime;
@@ -19,8 +21,9 @@ struct TResources {
 
 double GetProcessorTime() {
     struct rusage rusage;
-    if ( getrusage( RUSAGE_SELF, &rusage ) != -1 )
+    if (getrusage(RUSAGE_SELF, &rusage) != -1) {
         return (double)rusage.ru_utime.tv_sec + (double)rusage.ru_utime.tv_usec / 1000000.0;
+    }
     return 0;
 }
 
@@ -41,26 +44,25 @@ Json::Value Measure(TMeasuredFunction&& fun) {
 std::vector<int> a, b, c, d;
 
 void InitData() {
-    for (int i : Range(1000000)) {
+    for (int i = 0; i < 1000000; ++i) {
         a.push_back(i * i * i ^ i);
         b.push_back(i * i * i | i);
     }
-    for (int i : Range(1000)) {
+    for (int i = 0; i < 1000; ++i) {
         c.push_back(i * i * i ^ i);
         d.push_back(i * i * i | i);
     }
 }
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 int BenchEnumerate() {
     int res = 0;
-    for (int i : Range(metaIterations)) {
-        #ifdef USE_FUNCTOOLS
+    for (int i = 0; i < metaIterations; ++i) {
+        #if !defined(native_REALISATION)
             for (auto [j, aj] : Enumerate(a)) {
                 res += i ^ j * aj;
             }
-        #endif
-        #ifdef USE_NATIVE
+        #else
             for (size_t j = 0; j < a.size(); ++j) {
                 res += i ^ j * a[j];
             }
@@ -72,8 +74,8 @@ int BenchEnumerate() {
 
 int BenchZip() {
     int res = 0;
-    for (int i : Range(metaIterations)) {
-        #ifdef USE_FUNCTOOLS
+    for (int i = 0; i < metaIterations; ++i) {
+        #if !defined(native_REALISATION)
             #if !defined(boost_range_REALISATION)
                 for (auto [aj, bj] : Zip(a, b)) {
                     res += i ^ aj * bj;
@@ -85,8 +87,7 @@ int BenchZip() {
                     res += i ^ aj * bj;
                 }
             #endif
-        #endif
-        #ifdef USE_NATIVE
+        #else
             for (size_t j = 0; j < a.size() && j < b.size(); ++j) {
                 res += i ^ a[j] * b[j];
             }
@@ -100,13 +101,12 @@ int BenchFilter() {
     auto pred = [](auto x) {
         return bool(x & 1);
     };
-    for (int i : Range(metaIterations)) {
-        #ifdef USE_FUNCTOOLS
+    for (int i = 0; i < metaIterations; ++i) {
+        #if !defined(native_REALISATION)
             for (auto aj : Filter(pred, a)) {
                 res += i ^ aj;
             }
-        #endif
-        #ifdef USE_NATIVE
+        #else
             for (size_t j = 0; j < a.size(); ++j) {
                 if (a[j] & 1) {
                     res += i ^ a[j];
@@ -118,16 +118,15 @@ int BenchFilter() {
 }
 
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 int BenchCartesianProduct() {
     int res = 0;
-    for (int i : Range(metaIterations)) {
-        #ifdef USE_FUNCTOOLS
+    for (int i = 0; i < metaIterations; ++i) {
+        #if !defined(native_REALISATION)
             for (auto [aj, bj] : CartesianProduct(c, d)) {
                 res += i ^ aj * bj;
             }
-        #endif
-        #ifdef USE_NATIVE
+        #else
             for (size_t j = 0; j < c.size(); ++j) {
                 for (size_t k = 0; k < d.size(); ++k) {
                     res += i ^ c[j] * d[k];
@@ -143,13 +142,12 @@ int BenchCartesianProduct() {
 #if !defined(boost_range_REALISATION)
 int BenchConcatenate() {
     int res = 0;
-    for (int i : Range(metaIterations)) {
-        #ifdef USE_FUNCTOOLS
+    for (int i = 0; i < metaIterations; ++i) {
+        #if !defined(native_REALISATION)
             for (auto x : Concatenate(a, b)) {
                 res += i ^ x;
             }
-        #endif
-        #ifdef USE_NATIVE
+        #else
             for (size_t j = 0; j < a.size(); ++j) {
                 res += i ^ a[j];
             }
@@ -179,8 +177,10 @@ int main(int argc, char** argv) {
         MEASURE(BenchZip);
         MEASURE(BenchFilter);
         #if !defined(boost_range_REALISATION)
-            MEASURE(BenchEnumerate);
             MEASURE(BenchConcatenate);
+        #endif
+        #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
+            MEASURE(BenchEnumerate);
             MEASURE(BenchCartesianProduct);
         #endif
     #undef MEASURE

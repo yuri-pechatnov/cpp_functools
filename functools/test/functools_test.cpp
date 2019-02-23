@@ -4,6 +4,8 @@
 
 #include <vector>
 
+#if !defined(native_REALISATION)
+
 using namespace NFuncTools;
 
 class TestFunctools : public ::testing::Test
@@ -15,7 +17,7 @@ protected:
 	}
 };
 
-
+#if !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range1) {
     std::vector a = {0, 1, 4};
     std::vector<std::vector<int>> b = {
@@ -32,7 +34,9 @@ TEST_F(TestFunctools, Range1) {
         ASSERT_EQ(range, b[i]);
     }
 }
+#endif
 
+#if !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range2) {
     std::vector from = {0, 0, 2, 2};
     std::vector to = {0, 1, 4, 6};
@@ -51,9 +55,10 @@ TEST_F(TestFunctools, Range2) {
         ASSERT_EQ(range, b[i]);
     }
 }
+#endif
 
 
-#if !defined(range_v3_REALISATION)
+#if !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range3) {
     std::vector<int> a;
     for (int i : Range(3, 9, 2)) {
@@ -64,7 +69,7 @@ TEST_F(TestFunctools, Range3) {
 #endif
 
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Enumerate) {
     std::vector a = {1, 2, 4};
     std::vector<int> b;
@@ -87,7 +92,7 @@ TEST_F(TestFunctools, Enumerate) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, EnumerateTemporary) {
     std::vector a = {1, 2, 4};
     std::vector<int> b;
@@ -111,21 +116,28 @@ TEST_F(TestFunctools, EnumerateTemporary) {
 TEST_F(TestFunctools, Zip) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
-#if !defined(boost_range_REALISATION)
+        #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
         {{1, 2, 3}, {4, 5, 6, 7}},
         {{1, 2, 3, 4}, {4, 5, 6}},
         {{1, 2, 3, 4}, {}},
-#endif
+        #endif
     };
 
     for (auto [a, b] : ts) {
         int k = 0;
-#if !defined(boost_range_REALISATION)
+        #if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
+        for (const auto& [i, j] : Zip(a, std::vector<int32_t>(b))) {
+            ASSERT_EQ(++k, i);
+            ASSERT_EQ(i + 3, j);
+        }
+        #endif
+        k = 0;
+        #if !defined(boost_range_REALISATION)
         for (const auto& [i, j] : Zip(a, b)) {
             ASSERT_EQ(++k, i);
             ASSERT_EQ(i + 3, j);
         }
-#else
+        #else
         auto zipResult = Zip(a, b);
         for (const auto t : zipResult) {
             int32_t i, j;
@@ -133,7 +145,7 @@ TEST_F(TestFunctools, Zip) {
             ASSERT_EQ(++k, i);
             ASSERT_EQ(i + 3, j);
         }
-#endif
+        #endif
         ASSERT_EQ(k, std::min(a.size(), b.size()));
     }
 }
@@ -153,11 +165,14 @@ TEST_F(TestFunctools, ZipReference) {
 #if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Zip3) {
     std::vector<std::tuple<std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>> ts = {
+        {{1, 2, 3}, {4, 5, 6}, {11, 3, 9}},
+        #if !defined(think_cell_REALISATION)
         {{1, 2, 3}, {4, 5, 6}, {11, 3}},
         {{1, 2, 3}, {4, 5, 6, 7}, {9, 0}},
         {{1, 2, 3, 4}, {9}, {4, 5, 6}},
         {{1, 2, 3, 4}, {1}, {}},
         {{}, {1}, {1, 2, 3, 4}},
+        #endif
     };
 
     for (auto [a, b, c] : ts) {
@@ -244,7 +259,7 @@ TEST_F(TestFunctools, Map) {
     ASSERT_EQ(roundedFloats, resFloat);
 }
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CartesianProduct) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
@@ -282,7 +297,7 @@ TEST_F(TestFunctools, CartesianProduct) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CartesianProduct3) {
     std::vector<std::tuple<std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}, {11, 3}},
@@ -339,7 +354,7 @@ TEST_F(TestFunctools, Concatenate2) {
         ASSERT_EQ(c, d);
     }
 
-    #if !defined(range_v3_REALISATION)
+    #if !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
     {
         std::vector<int32_t> a = {1, 2, 3, 4};
         std::vector<int32_t> c;
@@ -353,7 +368,7 @@ TEST_F(TestFunctools, Concatenate2) {
 #endif
 
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Flatten) {
     {
         std::vector <int> a = {1, 2, 3};
@@ -385,7 +400,7 @@ TEST_F(TestFunctools, Flatten) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Combo) {
     for (auto [i, j] : Enumerate(Range(10))) {
         ASSERT_EQ(i, j);
@@ -453,7 +468,7 @@ TEST_F(TestFunctools, Combo) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CopyIterator) {
     std::vector a = {1, 2, 3, 4};
     std::vector b = {4, 5, 6, 7};
@@ -533,7 +548,7 @@ TEST_F(TestFunctools, CopyIterator) {
 }
 #endif
 
-
+#endif // #if !defined(native_REALISATION)
 
 int main(int argc, char *argv[])
 {
