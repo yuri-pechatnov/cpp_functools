@@ -15,6 +15,55 @@ protected:
 	}
 };
 
+
+TEST_F(TestFunctools, Range1) {
+    std::vector a = {0, 1, 4};
+    std::vector<std::vector<int>> b = {
+        {},
+        {0},
+        {0, 1, 2, 3},
+    };
+    for (int i = 0; i < a.size(); ++i) {
+        std::vector<int> range;
+        for (auto i : Range(a[i])) {
+            ASSERT_EQ(i, (int)range.size());
+            range.push_back(i);
+        }
+        ASSERT_EQ(range, b[i]);
+    }
+}
+
+TEST_F(TestFunctools, Range2) {
+    std::vector from = {0, 0, 2, 2};
+    std::vector to = {0, 1, 4, 6};
+    std::vector<std::vector<int>> b = {
+        {},
+        {0},
+        {2, 3},
+        {2, 3, 4, 5},
+    };
+    for (int i = 0; i < from.size(); ++i) {
+        std::vector<int> range;
+        for (auto j : Range(from[i], to[i])) {
+            ASSERT_EQ(j, (int)range.size() + from[i]);
+            range.push_back(j);
+        }
+        ASSERT_EQ(range, b[i]);
+    }
+}
+
+
+#if !defined(range_v3_REALISATION)
+TEST_F(TestFunctools, Range3) {
+    std::vector<int> a;
+    for (int i : Range(3, 9, 2)) {
+        a.push_back(i);
+    }
+    ASSERT_EQ(a, (std::vector{3, 5, 7}));
+}
+#endif
+
+
 #if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Enumerate) {
     std::vector a = {1, 2, 4};
@@ -38,7 +87,7 @@ TEST_F(TestFunctools, Enumerate) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
 TEST_F(TestFunctools, EnumerateTemporary) {
     std::vector a = {1, 2, 4};
     std::vector<int> b;
@@ -290,6 +339,7 @@ TEST_F(TestFunctools, Concatenate2) {
         ASSERT_EQ(c, d);
     }
 
+    #if !defined(range_v3_REALISATION)
     {
         std::vector<int32_t> a = {1, 2, 3, 4};
         std::vector<int32_t> c;
@@ -298,6 +348,7 @@ TEST_F(TestFunctools, Concatenate2) {
         }
         ASSERT_EQ(c, (std::vector<int32_t>{1, 2, 3, 4, 5, 6}));
     }
+    #endif
 }
 #endif
 
@@ -334,7 +385,7 @@ TEST_F(TestFunctools, Flatten) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
 TEST_F(TestFunctools, Combo) {
     for (auto [i, j] : Enumerate(Range(10))) {
         ASSERT_EQ(i, j);
@@ -402,7 +453,7 @@ TEST_F(TestFunctools, Combo) {
 }
 #endif
 
-#if !defined(boost_range_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
 TEST_F(TestFunctools, CopyIterator) {
     std::vector a = {1, 2, 3, 4};
     std::vector b = {4, 5, 6, 7};

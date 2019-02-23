@@ -6,6 +6,9 @@
 
 #include <vector>
 #include <iostream>
+#include <cassert>
+#include <string>
+#include <sstream>
 
 using namespace NFuncTools;
 
@@ -21,6 +24,9 @@ double GetProcessorTime() {
     return 0;
 }
 
+
+int metaIterations = 3;
+
 template <typename TMeasuredFunction>
 Json::Value Measure(TMeasuredFunction&& fun) {
     double startProcessorTime = GetProcessorTime();
@@ -28,10 +34,10 @@ Json::Value Measure(TMeasuredFunction&& fun) {
     Json::Value res;
     res["UserProcessorTime"] = GetProcessorTime() - startProcessorTime;
     res["ResultHash"] = hash;
+    res["MetaIterations"] = metaIterations;
     return res;
 }
 
-int metaIterations = 3;
 std::vector<int> a, b, c, d;
 
 void InitData() {
@@ -156,7 +162,13 @@ int BenchConcatenate() {
 }
 #endif
 
-int main() {
+int main(int argc, char** argv) {
+    assert(argc >= 2);
+    std::stringstream argsStream(argv[1]);
+    Json::Value args;
+    argsStream >> args;
+    metaIterations = args["MetaIterations"].asInt();
+
     InitData();
     Json::Value report;
     auto& result = report["Benchmarks"];
@@ -172,7 +184,6 @@ int main() {
             MEASURE(BenchCartesianProduct);
         #endif
     #undef MEASURE
-
     std::cout << report << std::endl;
     return 0;
 }

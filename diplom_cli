@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
 
+'''
+
+Examples:
+    ./diplom_cli compile_bench  -o report.txt
+    ./diplom_cli report_bench -i report.txt --filter_by exit_code=0 OptimizeLevel=2 --aggregate_by Realisation
+
+    ./diplom_cli compile_bench --bench_repeat 3 -o compile_report.txt
+    ./diplom_cli report_bench -i compile_report.txt --aggregate_by Realisation,Bench --heatmap user_time:Realisation*Bench  -o compile_report_o2_o3.png
+
+    ./diplom_cli bench --meta_iterations=1000  --bench_repeat 20 -o report.txt
+    ./diplom_cli report_bench -i report.txt --aggregate_by Realisation,Bench --heatmap UserProcessorTime:Realisation*Bench  -o report.png
+
+'''
+
 import argparse
 import json
 import logging
@@ -7,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import pandas as pd
 
 from collections import defaultdict
 from contextlib import contextmanager
@@ -32,6 +47,17 @@ def safe_shell_run(cmd):
     logging.info("exec: %s", cmd)
     assert(0 == os.system(cmd))
 
+def run_and_get_output(cmd, **kwargs):
+    logging.info("exec: %s", cmd)
+    return subprocess.check_output(cmd, shell=True, **kwargs)
+
+def print_s(s, fname=None):
+    if fname:
+        with open(fname, 'w') as f:
+            f.write(s)
+    else:
+        print(s)
+
 def build_path():
     return real_path("build")
 
@@ -50,15 +76,21 @@ def jsoncpp_static_lib_path():
 def boost_range_include_path():
     return real_path("boost")
 
+def range_v3_include_path():
+    return real_path("range-v3/include")
 
-def gcc_cmd(includes):
-    return "g++ -std=c++17 -isystem -pthread " + " ".join("-I" + i for i in includes)
 
-def clear(**other_args):
+def default_compilers():
+    return ["g++", "clang++"]
+
+def gcc_cmd(includes, compiler_bin):
+    return f"{compiler_bin} -std=c++17 -isystem -pthread " + " ".join("-I" + i for i in includes)
+
+def clear():
     with work_in_root_path():
         safe_shell_run("rm -rf build googletest jsoncpp")
 
-def init(**other_args):
+def init():
     with work_in_root_path():
         if not os.path.exists(build_path()):
             os.mkdir(build_path())
@@ -67,7 +99,7 @@ def init(**other_args):
         gtest_path = real_path("googletest")
         if not os.path.exists(gtest_path):
             safe_shell_run("git clone https://github.com/google/googletest.git")
-            safe_shell_run(gcc_cmd(includes=[gtest_include_path(), real_path("googletest/googletest")]) +
+            safe_shell_run(gcc_cmd(compiler_bin="g++", includes=[gtest_include_path(), real_path("googletest/googletest")]) +
                            " -c " + real_path("googletest/googletest/src/gtest-all.cc") +
                            " -o " + real_path("build/gtest-all.o"))
             safe_shell_run(f"ar -rv {gtest_static_lib_path()} build/gtest-all.o")
@@ -94,68 +126,104 @@ def init(**other_args):
             safe_shell_run("./bootstrap.sh --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --with-libraries=all")
             safe_shell_run("./b2 --prefix=../build/boost/ --exec-prefix=../build/boost-exec/ --build-dir=../build/boost-build")
 
-def run_test(functools_realisations, **other_args):
+    with work_in_root_path():
+        boost_range_path = real_path("range-v3")
+        if not os.path.exists(boost_range_path):
+            safe_shell_run("git clone  https://github.com/ericniebler/range-v3.git")
+
+
+def run_test(functools_realisations, compilers):
     logging.info("run_test: %s", locals())
     init()
     if len(functools_realisations) == 0:
         functools_realisations = os.listdir(real_path("functools/realisations"))
-    for realisation in functools_realisations:
-        realisation_include = real_path(f"functools/realisations/{realisation}")
-        test_source = real_path("functools/test/functools_test.cpp")
-        test_binary = real_path(f"build/test_{realisation}")
-        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), real_path("functools/util"), realisation_include]) +
-                       f" {gtest_static_lib_path()} " +
-                       f" -D{realisation}_REALISATION " +
-                       test_source +
-                       " -o " + test_binary)
-        safe_shell_run(test_binary)
+    for compiler in compilers:
+        for realisation in functools_realisations:
+            realisation_include = real_path(f"functools/realisations/{realisation}")
+            test_source = real_path("functools/test/functools_test.cpp")
+            test_binary = real_path(f"build/test_{realisation}")
+            safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(),
+                                             real_path("functools/util"), realisation_include],
+                                   compiler_bin=compiler) +
+                           f" {gtest_static_lib_path()} " +
+                           f" -D{realisation}_REALISATION " +
+                           test_source +
+                           " -o " + test_binary)
+            safe_shell_run(test_binary)
 
 
-def run_bench(functools_realisations, **other_args):
+def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, output_file):
     logging.info("run_bench: %s", locals())
     init()
+
+    not_native_realisations = os.listdir(real_path("functools/realisations"))
     if len(functools_realisations) == 0:
-        functools_realisations = os.listdir(real_path("functools/realisations"))
+        functools_realisations = not_native_realisations + ['native']
     bench_result = []
 
-    def run_one_bench(realisation, bench_type, store_key, optimize_level=2):
-        realisation_include = real_path(f"functools/realisations/{realisation}")
+    logging.info(repr(functools_realisations))
+
+    def bench_exe_name(realisation, optimize_level, compiler):
+        return real_path(f"build/bench_{realisation}_{compiler}_o{optimize_level}")
+
+    def prepare_one_bench(realisation, optimize_level, compiler):
+        realisation_include = real_path(f"functools/realisations/{not_native_realisations[0] if realisation == 'native' else realisation}")
         bench_source = real_path("functools/bench/bench.cpp")
-        bench_binary = real_path(f"build/bench_{realisation}")
-        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
+        bench_binary = bench_exe_name(realisation, optimize_level, compiler)
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(),
+                                         jsoncpp_include_path(), real_path("functools/util"), realisation_include],
+                               compiler_bin=compiler) +
                        f" -O{optimize_level} " +
-                       f" -D{bench_type} " +
+                       f" -D{'USE_NATIVE' if realisation == 'native' else 'USE_FUNCTOOLS'} " +
                        f" -D{realisation}_REALISATION " +
                        f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                        bench_source +
                        " -o " + bench_binary)
-        one_result = json.loads(subprocess.check_output(bench_binary, shell=True))
-        one_result.update({
-            "Realisation": store_key,
-            "OptimizeLevel": optimize_level,
-        })
-        bench_result.append(one_result)
 
-    for optimize_level in [2, 3]:
-        for realisation in functools_realisations:
-            run_one_bench(realisation, "USE_FUNCTOOLS", realisation, optimize_level)
-        run_one_bench(functools_realisations[0], "USE_NATIVE", "native", optimize_level)
+    def run_one_bench(realisation, optimize_level, compiler):
+        bench_binary = bench_exe_name(realisation, optimize_level, compiler)
+
+        args = json.dumps({"MetaIterations": meta_iterations})
+
+        batch_result = json.loads(run_and_get_output(f"{bench_binary} '{args}'"))
+        for bench, one_result in batch_result["Benchmarks"].items():
+            one_result.update({
+                "Bench": bench,
+                "Realisation": realisation,
+                "OptimizeLevel": optimize_level,
+                "Compiler": compiler,
+            })
+            bench_result.append(one_result)
+
+    params = [(compiler, optimize_level, realisation)
+              for compiler in compilers
+              for optimize_level in [2, 3]
+              for realisation in functools_realisations]
+
+    for compiler, optimize_level, realisation in params:
+        prepare_one_bench(realisation, optimize_level, compiler)
+
+    for i in range(bench_repeat):
+        for compiler, optimize_level, realisation in params:
+            run_one_bench(realisation, optimize_level, compiler)
+
+    print_s(json.dumps(bench_result, indent=4), output_file)
+
+    result_hashes = defaultdict(list)
+    for br in bench_result:
+        result_hashes[br["Bench"]].append(br["ResultHash"])
+    for b_name, hashes in result_hashes.items():
+        assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
 
 
-    #~ print(json.dumps(bench_result, indent=4, sort_keys=True))
-    #~ result_hashes = defaultdict(list)
-    #~ for br in bench_result:
-        #~ for b_name, b_result in br["Benchmarks"].items():
-            #~ result_hashes[b_name].append(b_result["ResultHash"])
-    #~ for b_name, hashes in result_hashes.items():
-        #~ assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
-
-
-def run_compile_bench(functools_realisations, benchmarks, **other_args):
+def run_compile_bench(functools_realisations, benchmarks, compilers, bench_repeat, output_file):
     logging.info("run_compile_bench: %s", locals())
     init()
+
+    not_native_realisations = os.listdir(real_path("functools/realisations"))
     if len(functools_realisations) == 0:
-        functools_realisations = os.listdir(real_path("functools/realisations"))
+        functools_realisations = not_native_realisations + ['native']
+
     bench_source = real_path("functools/compile_bench/compile_bench.cpp")
     if len(benchmarks) == 0:
         with open(bench_source) as f:
@@ -181,23 +249,27 @@ def run_compile_bench(functools_realisations, benchmarks, **other_args):
 
     bench_result = []
 
-    def run_one_bench(realisation, bench, bench_type, store_key, optimize_level=2):
-        realisation_include = real_path(f"functools/realisations/{realisation}")
-        bench_result_report = real_path(f"build/compile_bench_{realisation}.report")
-        bench_result_lib = real_path(f"build/compile_bench_{realisation}.o")
+    def run_one_bench(realisation, bench, optimize_level, compiler):
+        realisation_include = real_path(f"functools/realisations/{not_native_realisations[0] if realisation == 'native' else realisation}")
+        params_key = f"{realisation}_{bench}_{compiler}_{optimize_level}"
+        bench_result_report = real_path(f"build/compile_bench_{params_key}.report")
+        bench_result_lib = real_path(f"build/compile_bench_{params_key}.o")
+        bench_compiler_message = real_path(f"build/compile_bench_{params_key}.compiler_message")
         try:
-            _ = subprocess.check_output(
+            _ = run_and_get_output(
                 f"{time_command} --quiet -f '{time_format}' -o {bench_result_report} " +
-                gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), jsoncpp_include_path(), real_path("functools/util"), realisation_include]) +
+                gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(),
+                                  jsoncpp_include_path(), real_path("functools/util"), realisation_include],
+                        compiler_bin=compiler) +
                 f" -O{optimize_level} " +
-                f" -D{bench_type} " +
+                f" -D{'USE_NATIVE' if realisation == 'native' else 'USE_FUNCTOOLS'} " +
                 f" -D{realisation}_REALISATION " +
                 f" -D{bench}_BENCH " +
                 f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                 " -c " +
                 bench_source +
-                " -o " + bench_result_lib,
-                shell=True,
+                " -o " + bench_result_lib +
+                f" 2>&1 1>{bench_compiler_message}",
                 stderr=subprocess.STDOUT,
             )
             with open(bench_result_report) as f:
@@ -208,54 +280,108 @@ def run_compile_bench(functools_realisations, benchmarks, **other_args):
                 "exit_code": e.returncode
             }
         one_result.update({
-            "Realisation": store_key,
+            "Realisation": realisation,
             "Bench": bench,
             "OptimizeLevel": optimize_level,
             "BinarySize": os.stat(bench_result_lib).st_size if one_result["exit_code"] == 0 else None,
+            "Compiler": compiler,
         })
+
         print(json.dumps(one_result))
         bench_result.append(one_result)
 
-    for optimize_level in [2, 3]:
-        for bench in benchmarks:
-            for realisation in functools_realisations:
-                run_one_bench(realisation, bench, "USE_FUNCTOOLS", realisation, optimize_level)
-            run_one_bench(functools_realisations[0], bench, "USE_NATIVE", "native", optimize_level)
+    for i in range(bench_repeat):
+        for compiler in compilers:
+            for optimize_level in [2, 3]:
+                for bench in benchmarks:
+                    for realisation in functools_realisations:
+                        run_one_bench(realisation, bench, optimize_level, compiler)
+
+    print_s(json.dumps(bench_result, indent=4, sort_keys=True), fname=output_file)
 
 
-    print(json.dumps(bench_result, indent=4, sort_keys=True))
-    #~ result_hashes = defaultdict(list)
-    #~ for br in bench_result:
-        #~ for b_name, b_result in br["Benchmarks"].items():
-            #~ result_hashes[b_name].append(b_result["ResultHash"])
-    #~ for b_name, hashes in result_hashes.items():
-        #~ assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
+def report_bench(input_file, output_file, aggregate_by, filter_by, heatmap):
+    logging.info("report_bench: %s", locals())
+    with open(input_file) as f:
+        report = pd.DataFrame(json.load(f))
+    for filter_pair in filter_by:
+        try:
+            field, value = filter_pair.strip().split('=')
+            #print(report)
+            field_type = type(report.loc[report.index[0], field])
+            logging.info("Filter %s == %s(%s)", field, repr(field_type), value)
+            report = report[report[field] == field_type(value)]
+        except Exception as e:
+            logging.exception("Can't apply filter %s=%s", field, value)
+    for aggr in aggregate_by:
+        report = report.groupby(aggr.split(',')).mean()
+    if heatmap:
+        target, X, Y = re.findall(r"(.*):(.*)\*(.*)", heatmap)[0]
+        hmap = defaultdict(dict)
+        for (x, y), idxs in report.groupby([X, Y]).groups.items():
+            hmap[x][y] = report.loc[idxs, target].mean()
+        report = pd.DataFrame(hmap)
+
+    if output_file.endswith(".html"):
+        print_s(report.to_html(), output_file)
+    elif output_file.endswith(".png") or output_file.endswith(".pdf"):
+        assert heatmap and output_file
+
+        import seaborn
+        import matplotlib.colors as colors
+
+        seaborn.set(rc={'figure.figsize':(15,10)})
+        seaborn.heatmap(report, annot=True, cmap="YlOrBr", norm=colors.LogNorm(0, report.max())).get_figure().savefig(output_file)
+    else:
+        print(report)
+
 
 if __name__ == "__main__":
     logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
                         level=logging.INFO)
 
-    parser = argparse.ArgumentParser("Iurii Pechatnov's diploma cli")
+    parser = argparse.ArgumentParser(
+        "Iurii Pechatnov's diploma cli",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
     subparsers = parser.add_subparsers()
 
-    parser_init = subparsers.add_parser('init')
-    parser_init.set_defaults(func=lambda x: init(**x.__dict__))
+    @contextmanager
+    def subparser(name, f):
+        p = subparsers.add_parser(name)
+        yield p
+        def func(args):
+            d = args.__dict__.copy()
+            del d['func']
+            f(**d)
+        p.set_defaults(func=func)
 
-    parser_init = subparsers.add_parser('clear')
-    parser_init.set_defaults(func=lambda x: clear(**x.__dict__))
-
-    parser_test = subparsers.add_parser('test')
-    parser_test.add_argument('functools_realisations', nargs='*', default=[], type=str)
-    parser_test.set_defaults(func=lambda x: run_test(**x.__dict__))
-
-    parser_bench = subparsers.add_parser('bench')
-    parser_bench.add_argument('functools_realisations', nargs='*', default=[], type=str)
-    parser_bench.set_defaults(func=lambda x: run_bench(**x.__dict__))
-
-    parser_compile_bench = subparsers.add_parser('compile_bench')
-    parser_compile_bench.add_argument('functools_realisations', nargs='*', default=[], type=str)
-    parser_compile_bench.add_argument('benchmarks', nargs='*', default=[], type=str)
-    parser_compile_bench.set_defaults(func=lambda x: run_compile_bench(**x.__dict__))
+    with subparser('init', init) as p:
+        pass
+    with subparser('clear', clear) as p:
+        pass
+    with subparser('test', run_test) as p:
+        p.add_argument('functools_realisations', nargs='*', default=[], type=str)
+        p.add_argument('--compilers', nargs='*', default=default_compilers(), type=str)
+    with subparser('bench', run_bench) as p:
+        p.add_argument('-r', '--functools_realisations', nargs='*', default=[], type=str)
+        p.add_argument('-m', '--meta_iterations', default=3, type=int)
+        p.add_argument('--compilers', nargs='*', default=default_compilers(), type=str)
+        p.add_argument('--bench_repeat', default=1, type=int)
+        p.add_argument('-o', '--output_file', default='', type=str)
+    with subparser('compile_bench', run_compile_bench) as p:
+        p.add_argument('-r', '--functools_realisations', nargs='*', default=[], type=str)
+        p.add_argument('-b', '--benchmarks', nargs='*', default=[], type=str)
+        p.add_argument('--compilers', nargs='*', default=default_compilers(), type=str)
+        p.add_argument('--bench_repeat', default=1, type=int)
+        p.add_argument('-o', '--output_file', default='', type=str)
+    with subparser('report_bench', report_bench) as p:
+        p.add_argument('-i', '--input_file', default='', type=str)
+        p.add_argument('--aggregate_by', nargs='*', default=[], type=str)
+        p.add_argument('--filter_by', nargs='*', default=[], type=str)
+        p.add_argument('--heatmap', default='', type=str)
+        p.add_argument('-o', '--output_file', default='', type=str)
 
     args = parser.parse_args()
     args.func(args)

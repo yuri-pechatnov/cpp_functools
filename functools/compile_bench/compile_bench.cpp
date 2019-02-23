@@ -1,8 +1,12 @@
-#include <functools.h>
+#ifdef USE_FUNCTOOLS
+    #include <functools.h>
+
+    using namespace NFuncTools;
+#endif
 
 #include <vector>
 
-using namespace NFuncTools;
+
 
 
 #if defined(BenchEnumerate_BENCH)
@@ -80,10 +84,11 @@ int BenchCartesianProduct(const std::vector<int>& a, const std::vector<int>& b) 
     #ifdef USE_NATIVE
         for (size_t j = 0; j < a.size(); ++j) {
             for (size_t k = 0; k < b.size(); ++k) {
-                res += c[j] * d[k];
+                res += a[j] * b[k];
             }
         }
     #endif
+    return res;
 }
 #endif
 

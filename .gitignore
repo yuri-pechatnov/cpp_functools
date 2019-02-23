@@ -2,4 +2,5 @@ build
 googletest
 jsoncpp
 range
+range-v3
 boost
