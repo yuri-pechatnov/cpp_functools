@@ -7,6 +7,17 @@
 namespace NFuncTools::NPrivate {
     template <typename... TContainers>
     struct TZipper {
+
+        template <typename TContainer, typename TIteratorCategory = typename std::iterator_traits<decltype(std::declval<TContainer>().begin())>::iterator_category>
+        static constexpr bool HasRandomAccessIterator(int32_t) {
+            return std::is_same<TIteratorCategory, std::random_access_iterator_tag>::value;
+        }
+
+        template <typename TContainer>
+        static constexpr bool HasRandomAccessIterator(uint32_t) {
+            return false;
+        }
+
         template <std::size_t... I>
         static auto Zip(TContainers&&... containers, std::index_sequence<I...>) {
             using namespace NHelpers;
@@ -14,7 +25,24 @@ namespace NFuncTools::NPrivate {
             return TGeneratorRange(
                 [holders = std::tuple{TAutoEmbedOrPtrPolicy<TContainers>(containers)...}]() mutable {
                     auto iters = std::tuple{std::get<I>(holders).Ptr()->begin()...};
-                    return TGeneratorRangeIterator(
+                    if constexpr ((HasRandomAccessIterator<TContainers>(0) && ...)) {
+                        auto endOfFirst = std::get<0>(holders).Ptr()->begin() + std::min({
+                            std::get<I>(holders).Ptr()->end() - std::get<I>(holders).Ptr()->begin()...});
+                        return TGeneratorRangeIterator(
+                            [&holders, iters, endOfFirst](auto query) mutable {
+                                if constexpr (query.GetCurrent) {
+                                    // std::forward_as_tuple is bad idea, because we should not take references to objects that are not returned by reference
+                                    return std::tuple<decltype(*std::declval<TContainers>().begin())...>(*std::get<I>(iters)...);
+                                }
+                                if constexpr (query.IsNotEnd) {
+                                    return std::get<0>(iters) != endOfFirst;
+                                }
+                                if constexpr (query.Next) {
+                                    (++std::get<I>(iters), ...);
+                                }
+                            });
+                    } else {
+                        return TGeneratorRangeIterator(
                         [&holders, iters](auto query) mutable {
                             if constexpr (query.GetCurrent) {
                                 // std::forward_as_tuple is bad idea, because we should not take references to objects that are not returned by reference
@@ -27,7 +55,9 @@ namespace NFuncTools::NPrivate {
                                 (++std::get<I>(iters), ...);
                             }
                         });
+                    }
                 });
+
         }
     };
 
@@ -40,15 +70,15 @@ namespace NFuncTools::NPrivate {
             auto& currentIterator = std::get<position>(iteratorsTuple);
             ++currentIterator.Get();
 
-            if (!(currentIterator.Get() != std::get<position>(holdersTuple).Ptr()->end())) {
+            if (currentIterator.Get() != std::get<position>(holdersTuple).Ptr()->end()) {
+                return false;
+            } else {
                 currentIterator = std::get<position>(holdersTuple).Ptr()->begin();
                 if constexpr (position == 0) {
                     return true;
                 } else {
                     return IncrementIteratorsTuple<TIteratorsTuple, THoldersTuple, position - 1>(iteratorsTuple, holdersTuple);
                 }
-            } else {
-                return false;
             }
         }
 

@@ -3,6 +3,7 @@
 #include <functools.h>
 
 #include <vector>
+#include <set>
 
 #if !defined(native_REALISATION)
 
@@ -124,14 +125,24 @@ TEST_F(TestFunctools, Zip) {
     };
 
     for (auto [a, b] : ts) {
-        int k = 0;
         #if !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION)
-        for (const auto& [i, j] : Zip(a, std::vector<int32_t>(b))) {
-            ASSERT_EQ(++k, i);
-            ASSERT_EQ(i + 3, j);
+        {
+            int k = 0;
+            for (const auto& [i, j] : Zip(a, std::vector<int32_t>(b))) {
+                ASSERT_EQ(++k, i);
+                ASSERT_EQ(i + 3, j);
+            }
+        }
+        {
+            int k = 0;
+            for (const auto& [i, j] : Zip(std::set<int32_t>(a.begin(), a.end()), std::set<int32_t>(b.begin(), b.end()))) {
+                ASSERT_EQ(++k, i);
+                ASSERT_EQ(i + 3, j);
+            }
         }
         #endif
-        k = 0;
+
+        int k = 0;
         #if !defined(boost_range_REALISATION)
         for (const auto& [i, j] : Zip(a, b)) {
             ASSERT_EQ(++k, i);
