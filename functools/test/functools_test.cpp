@@ -18,6 +18,48 @@ protected:
 	}
 };
 
+template <typename TContainer>
+auto ToVector(TContainer&& container) {
+    return std::vector{container.begin(), container.end()};
+}
+
+template <typename TContainerObjOrRef>
+void TestViewCompileability(TContainerObjOrRef&& container) {
+    using TContainer = std::decay_t<TContainerObjOrRef>;
+    using TIterator = typename TContainer::iterator;
+
+    static_assert(std::is_same_v<decltype(container.begin()), TIterator>);
+
+    using difference_type = typename std::iterator_traits<TIterator>::difference_type;
+    using value_type = typename std::iterator_traits<TIterator>::value_type;
+    using reference = typename std::iterator_traits<TIterator>::reference;
+    using pointer = typename std::iterator_traits<TIterator>::pointer;
+
+    {
+        // operator assignment
+        auto it = container.begin();
+        it = container.end();
+        it = std::move(container.begin());
+        // operator copying
+        auto it2 = it;
+        auto it3 = std::move(it);
+    }
+
+    auto it = container.begin();
+
+    // sanity check for types
+    using TConstReference = const std::decay_t<reference>&;
+    TConstReference ref = *it;
+    (void) static_cast<value_type>(*it);
+    (void) static_cast<difference_type>(1);
+    if constexpr (std::is_reference_v<decltype(*it)>) {
+        pointer ptr = &*it;
+    }
+
+    // std compatibility
+    ToVector(container);
+}
+
 #if !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range1) {
     std::vector a = {0, 1, 4};
@@ -69,6 +111,18 @@ TEST_F(TestFunctools, Range3) {
 }
 #endif
 
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileRange) {
+    TestViewCompileability(Range(19));
+    TestViewCompileability(Range(10, 19));
+    TestViewCompileability(Range(10, 19, 2));
+}
+#endif
+
+
+
+
+
 
 #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Enumerate) {
@@ -111,6 +165,13 @@ TEST_F(TestFunctools, EnumerateTemporary) {
     for (auto [i, x] : Enumerate(std::vector{1, 2, 3})) {
         ASSERT_EQ(i + 1, x);
     }
+}
+#endif
+
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION) && !defined(range_v3_REALISATION) && !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION)
+TEST_F(TestFunctools, CompileEnumerate) {
+    auto container = std::vector{1, 2, 3};
+    TestViewCompileability(Enumerate(container));
 }
 #endif
 
@@ -202,6 +263,14 @@ TEST_F(TestFunctools, Zip3) {
 }
 #endif
 
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileZip) {
+    auto container = std::vector{1, 2, 3};
+    TestViewCompileability(Zip(container));
+    TestViewCompileability(Zip(container, container, container));
+}
+#endif
+
 TEST_F(TestFunctools, Filter) {
     std::vector<std::vector<int32_t>> ts = {
         {},
@@ -230,6 +299,15 @@ TEST_F(TestFunctools, Filter) {
         ASSERT_EQ(b, c);
     }
 }
+
+
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileFilter) {
+    auto container = std::vector{1, 2, 3};
+    auto isOdd = [](int x) { return bool(x & 1); };
+    TestViewCompileability(Filter(isOdd, container));
+}
+#endif
 
 TEST_F(TestFunctools, Map) {
     std::vector<std::vector<int32_t>> ts = {
@@ -269,6 +347,14 @@ TEST_F(TestFunctools, Map) {
     ASSERT_EQ(ints, res);
     ASSERT_EQ(roundedFloats, resFloat);
 }
+
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileMap) {
+    auto container = std::vector{1, 2, 3};
+    auto sqr = [](int x) { return x * x; };
+    TestViewCompileability(Map(sqr, container));
+}
+#endif
 
 #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CartesianProduct) {
@@ -338,6 +424,13 @@ TEST_F(TestFunctools, CartesianProduct3) {
 }
 #endif
 
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileCartesianProduct) {
+    auto container = std::vector{1, 2, 3};
+    TestViewCompileability(CartesianProduct(container, container));
+}
+#endif
+
 #if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, Concatenate2) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
@@ -375,6 +468,13 @@ TEST_F(TestFunctools, Concatenate2) {
         ASSERT_EQ(c, (std::vector<int32_t>{1, 2, 3, 4, 5, 6}));
     }
     #endif
+}
+#endif
+
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, CompileConcatenate) {
+    auto container = std::vector{1, 2, 3};
+    TestViewCompileability(Concatenate(container, container));
 }
 #endif
 
@@ -423,7 +523,7 @@ TEST_F(TestFunctools, Combo) {
     }
 
     std::vector a = {0, 1, 2};
-    for (auto [i, j] : Enumerate(Reversed(a))) {
+    for (auto [i, j] : Enumerate(NFuncTools::Reversed(a))) {
         ASSERT_EQ(i, 2 - j);
     }
 
@@ -465,7 +565,7 @@ TEST_F(TestFunctools, Combo) {
     {
         // silly check for palindromness
         auto check = [](const auto& c) {
-            for (auto [x, rx] : Zip(c, Reversed(c))) {
+            for (auto [x, rx] : Zip(c, NFuncTools::Reversed(c))) {
                 if (x != rx) {
                     return false;
                 }

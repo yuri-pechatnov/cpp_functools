@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 template <class T>
 struct TPtrPolicy {
     inline TPtrPolicy(T* t)
