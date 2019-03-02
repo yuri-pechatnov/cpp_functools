@@ -204,7 +204,7 @@ namespace NFuncTools::NPrivate {
                             if constexpr (needIncrement) {
                                 ++std::get<index>(Iterators);
                             }
-                            if (std::get<index>(Iterators) == std::get<index>(*HoldersPtr).Ptr()->end()) {
+                            if (!(std::get<index>(Iterators) != std::get<index>(*HoldersPtr).Ptr()->end())) {
                                 ++Position;
                                 MaybeIncrementIteratorAndSkipExhaustedContainers<false, index + 1>();
                             }

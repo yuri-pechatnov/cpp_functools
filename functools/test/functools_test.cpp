@@ -18,6 +18,8 @@ protected:
 	}
 };
 
+
+
 template <typename TContainer>
 auto ToVector(TContainer&& container) {
     return std::vector{container.begin(), container.end()};
@@ -59,6 +61,26 @@ void TestViewCompileability(TContainerObjOrRef&& container) {
     // std compatibility
     ToVector(container);
 }
+
+struct TTestSentinel {};
+struct TTestIterator {
+    int operator*() {
+        return X;
+    }
+    void operator++() {
+        ++X;
+    }
+    bool operator!=(const TTestSentinel& other) const {
+        return X < 3;
+    }
+
+    int X;
+};
+
+auto MakeMinimalisticContainer() {
+    return MakeIteratorRange(TTestIterator{}, TTestSentinel{});
+}
+
 
 #if !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range1) {
@@ -120,10 +142,6 @@ TEST_F(TestFunctools, CompileRange) {
 #endif
 
 
-
-
-
-
 #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Enumerate) {
     std::vector a = {1, 2, 4};
@@ -172,6 +190,15 @@ TEST_F(TestFunctools, EnumerateTemporary) {
 TEST_F(TestFunctools, CompileEnumerate) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Enumerate(container));
+
+    std::vector<std::pair<int, int>> res;
+    for (auto [i, x] : Enumerate(MakeMinimalisticContainer())) {
+        res.push_back({i, x});
+    }
+    ASSERT_EQ(res, (std::vector<std::pair<int, int>>{
+        {0, 0}, {1, 1}, {2, 2},
+    }));
+
 }
 #endif
 
@@ -268,6 +295,15 @@ TEST_F(TestFunctools, CompileZip) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Zip(container));
     TestViewCompileability(Zip(container, container, container));
+
+    std::vector<std::pair<int, int>> res;
+    for (auto [a, b] : Zip(MakeMinimalisticContainer(), container)) {
+        res.push_back({a, b});
+    }
+    ASSERT_EQ(res, (std::vector<std::pair<int, int>>{
+        {0, 1}, {1, 2}, {2, 3},
+    }));
+
 }
 #endif
 
@@ -428,6 +464,16 @@ TEST_F(TestFunctools, CartesianProduct3) {
 TEST_F(TestFunctools, CompileCartesianProduct) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(CartesianProduct(container, container));
+
+    std::vector<std::pair<int, int>> res;
+    for (auto [a, b] : CartesianProduct(MakeMinimalisticContainer(), MakeMinimalisticContainer())) {
+        res.push_back({a, b});
+    }
+    ASSERT_EQ(res, (std::vector<std::pair<int, int>>{
+        {0, 0}, {0, 1}, {0, 2},
+        {1, 0}, {1, 1}, {1, 2},
+        {2, 0}, {2, 1}, {2, 2},
+    }));
 }
 #endif
 
@@ -475,6 +521,11 @@ TEST_F(TestFunctools, Concatenate2) {
 TEST_F(TestFunctools, CompileConcatenate) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Concatenate(container, container));
+    std::vector<int> res;
+    for (auto a : Concatenate(MakeMinimalisticContainer(), MakeMinimalisticContainer())) {
+        res.push_back(a);
+    }
+    ASSERT_EQ(res, (std::vector{0, 1, 2, 0, 1, 2}));
 }
 #endif
 
