@@ -85,11 +85,11 @@ class TSimpleOwningMappedIteratorRange {
 public:
     using TContainerStorage = TAutoEmbedOrPtrPolicy<TContainer>;
     using TMapperStorage = TAutoEmbedOrPtrPolicy<TMapper>;
-    using InternalIterator = typename std::remove_reference<TContainer>::type::iterator;
+    using InternalIterator = decltype(std::begin(std::declval<TContainer&>()));
 
     struct TMapperWrapper {
         template <class T>
-        auto operator()(T&& x) const {
+        decltype(auto) operator()(T&& x) const {
             return (*Mapper)(std::forward<T>(x));
         }
         std::remove_reference_t<TMapper>* Mapper;
@@ -108,14 +108,14 @@ public:
     }
 
     Iterator begin() {
-        return {Container.Ptr()->begin(), {Mapper.Ptr()}};
+        return {std::begin(*Container.Ptr()), {Mapper.Ptr()}};
     }
 
     Iterator end() {
-        return {Container.Ptr()->end(), {Mapper.Ptr()}};
+        return {std::end(*Container.Ptr()), {Mapper.Ptr()}};
     }
 
-private:
+protected:
     TContainerStorage Container;
     TMapperStorage Mapper;
 };
@@ -144,20 +144,23 @@ public:
     {
     }
 
+    using TBase::begin;
+    using TBase::end;
+
     ConstIterator begin() const {
-        return {this->Container.Ptr()->begin(), *this->Mapper.Ptr()};
+        return {std::begin(*this->Container.Ptr()), *this->Mapper.Ptr()};
     }
 
     ConstIterator end() const {
-        return {this->Container.Ptr()->end(), *this->Mapper.Ptr()};
+        return {std::end(*this->Container.Ptr()), *this->Mapper.Ptr()};
     }
 
     bool empty() const {
-        return this->Container.Ptr()->end() == this->Container.Ptr()->begin();
+        return std::end(*this->Container.Ptr()) == std::begin(*this->Container.Ptr());
     }
 
     size_type size() const {
-        return this->Container.Ptr()->end() - this->Container.Ptr()->begin();
+        return std::end(*this->Container.Ptr()) - std::begin(*this->Container.Ptr());
     }
 
     const_reference operator[](size_t at) const {
@@ -185,7 +188,7 @@ auto MakeMappedRange(TIterator begin, TIterator end, TMapper mapper) {
 
 template <class TContainer, class TMapper>
 auto MakeMappedRange(TContainer& container, TMapper mapper) {
-    return MakeMappedRange(container.begin(), container.end(), mapper);
+    return MakeMappedRange(std::begin(container), std::end(container), mapper);
 }
 
 template <class TContainer, class TMapper>

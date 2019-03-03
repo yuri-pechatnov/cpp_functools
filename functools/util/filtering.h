@@ -61,7 +61,7 @@ template <class TContainer, class TCondition>
 class TFilteringRange {
     using TContainerStorage = TAutoEmbedOrPtrPolicy<TContainer>;
     using TConditionStorage = TAutoEmbedOrPtrPolicy<TCondition>;
-    using TRawIterator = decltype(std::declval<TContainer>().begin());
+    using TRawIterator = decltype(std::begin(std::declval<TContainer&>()));
 
     struct TConditionWrapper {
         template <class T>
@@ -73,6 +73,7 @@ class TFilteringRange {
 public:
     using TIterator = TFilteringIterator<TRawIterator, TConditionWrapper>;
     using iterator = TIterator;
+    using const_iterator = TIterator;
 
     TFilteringRange(TContainer&& container, TCondition&& predicate)
         : Container(std::forward<TContainer>(container))
@@ -80,11 +81,11 @@ public:
     {}
 
     TIterator begin() {
-        return {Container.Ptr()->begin(), Container.Ptr()->end(), {Condition.Ptr()}};
+        return {std::begin(*Container.Ptr()), std::end(*Container.Ptr()), {Condition.Ptr()}};
     }
 
     TIterator end() {
-        return {Container.Ptr()->end(), Container.Ptr()->end(), {Condition.Ptr()}};
+        return {std::end(*Container.Ptr()), std::end(*Container.Ptr()), {Condition.Ptr()}};
     }
 
 private:

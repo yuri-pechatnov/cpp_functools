@@ -62,6 +62,8 @@ void TestViewCompileability(TContainerObjOrRef&& container) {
     ToVector(container);
 }
 
+
+#if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION) && !defined(range_v3_REALISATION) && !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION)
 struct TTestSentinel {};
 struct TTestIterator {
     int operator*() {
@@ -80,7 +82,7 @@ struct TTestIterator {
 auto MakeMinimalisticContainer() {
     return MakeIteratorRange(TTestIterator{}, TTestSentinel{});
 }
-
+#endif
 
 #if !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, Range1) {
@@ -190,6 +192,10 @@ TEST_F(TestFunctools, EnumerateTemporary) {
 TEST_F(TestFunctools, CompileEnumerate) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Enumerate(container));
+    const auto constContainer = std::vector{1, 2, 3};
+    TestViewCompileability(Enumerate(constContainer));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(Enumerate(arrayContainer));
 
     std::vector<std::pair<int, int>> res;
     for (auto [i, x] : Enumerate(MakeMinimalisticContainer())) {
@@ -295,7 +301,12 @@ TEST_F(TestFunctools, CompileZip) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Zip(container));
     TestViewCompileability(Zip(container, container, container));
+    const auto constContainer = std::vector{1, 2, 3};
+    TestViewCompileability(Zip(constContainer, constContainer));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(Zip(arrayContainer, arrayContainer));
 
+    #if !defined(boost_range_REALISATION)
     std::vector<std::pair<int, int>> res;
     for (auto [a, b] : Zip(MakeMinimalisticContainer(), container)) {
         res.push_back({a, b});
@@ -303,6 +314,7 @@ TEST_F(TestFunctools, CompileZip) {
     ASSERT_EQ(res, (std::vector<std::pair<int, int>>{
         {0, 1}, {1, 2}, {2, 3},
     }));
+    #endif
 
 }
 #endif
@@ -342,6 +354,8 @@ TEST_F(TestFunctools, CompileFilter) {
     auto container = std::vector{1, 2, 3};
     auto isOdd = [](int x) { return bool(x & 1); };
     TestViewCompileability(Filter(isOdd, container));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(Filter(isOdd, arrayContainer));
 }
 #endif
 
@@ -389,6 +403,8 @@ TEST_F(TestFunctools, CompileMap) {
     auto container = std::vector{1, 2, 3};
     auto sqr = [](int x) { return x * x; };
     TestViewCompileability(Map(sqr, container));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(Map(sqr, arrayContainer));
 }
 #endif
 
@@ -460,10 +476,14 @@ TEST_F(TestFunctools, CartesianProduct3) {
 }
 #endif
 
-#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CompileCartesianProduct) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(CartesianProduct(container, container));
+    const auto constContainer = std::vector{1, 2, 3};
+    TestViewCompileability(CartesianProduct(constContainer, constContainer));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(CartesianProduct(arrayContainer, arrayContainer));
 
     std::vector<std::pair<int, int>> res;
     for (auto [a, b] : CartesianProduct(MakeMinimalisticContainer(), MakeMinimalisticContainer())) {
@@ -517,10 +537,15 @@ TEST_F(TestFunctools, Concatenate2) {
 }
 #endif
 
-#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, CompileConcatenate) {
     auto container = std::vector{1, 2, 3};
     TestViewCompileability(Concatenate(container, container));
+    const auto constContainer = std::vector{1, 2, 3};
+    TestViewCompileability(Concatenate(constContainer, constContainer));
+    const int arrayContainer[] = {1, 2, 3};
+    TestViewCompileability(Concatenate(arrayContainer, arrayContainer));
+
     std::vector<int> res;
     for (auto a : Concatenate(MakeMinimalisticContainer(), MakeMinimalisticContainer())) {
         res.push_back(a);
