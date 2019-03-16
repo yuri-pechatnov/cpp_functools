@@ -318,13 +318,15 @@ def report_bench(input_file, output_file, aggregate_by, filter_by, heatmap):
     logging.info("report_bench: %s", locals())
     with open(input_file) as f:
         report = pd.DataFrame(json.load(f))
-    for filter_pair in filter_by:
+    for filter_pred in filter_by:
         try:
-            field, value = filter_pair.strip().split('=')
+            def predicate(df):
+                return eval(filter_pred)
+            #~ field, value = filter_pair.strip().split('=')
             #print(report)
-            field_type = type(report.loc[report.index[0], field])
-            logging.info("Filter %s == %s(%s)", field, repr(field_type), value)
-            report = report[report[field] == field_type(value)]
+            #~ field_type = type(report.loc[report.index[0], field])
+            #~ logging.info("Filter %s == %s(%s)", field, repr(field_type), value)
+            report = report[predicate(report)]
         except Exception as e:
             logging.exception("Can't apply filter %s=%s", field, value)
     for aggr in aggregate_by:
@@ -412,7 +414,7 @@ if __name__ == "__main__":
     with subparser('report_bench', report_bench) as p:
         p.add_arg('-i', '--input_file', default='', type=str)
         p.add_arg('--aggregate_by', nargs='*', default=[], type=str)
-        p.add_arg('--filter_by', nargs='*', default=[], type=str)
+        p.add_arg('--filter_by', nargs='*', default=[], type=str, help="Example: \"df.Realisation == 'baseline'\"")
         p.add_arg('--heatmap', default='', type=str)
         p.add_arg('-o', '--output_file', default='', type=str)
 

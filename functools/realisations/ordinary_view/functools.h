@@ -7,6 +7,9 @@
 
 #include <tuple>
 
+#define Y_LIKELY(Cond) __builtin_expect(!!(Cond), 1)
+#define Y_UNLIKELY(Cond) __builtin_expect(!!(Cond), 0)
+
 namespace NFuncTools::NPrivate {
 
     template <typename TContainer>
@@ -182,18 +185,13 @@ namespace NFuncTools::NPrivate {
                     auto& currentIterator = std::get<position>(Iterators);
                     ++currentIterator;
 
-                    if constexpr (position != 1) {
-                        if (__builtin_expect(currentIterator != std::end(*std::get<position - 1>(*HoldersPtr).Ptr()), 1)) {
-                            return;
-                        } else {
-                            currentIterator = std::begin(*std::get<position - 1>(*HoldersPtr).Ptr());
-                            IncrementIteratorsTuple<position - 1>();
-                        }
+                    if (currentIterator != std::end(*std::get<position - 1>(*HoldersPtr).Ptr())) {
+                        return;
                     } else {
-                        if (__builtin_expect(currentIterator != std::end(*std::get<0>(*HoldersPtr).Ptr()), 1)) {
-                            return;
+                        currentIterator = std::begin(*std::get<position - 1>(*HoldersPtr).Ptr());
+                        if constexpr (position != 1) {
+                            IncrementIteratorsTuple<position - 1>();
                         } else {
-                            currentIterator = std::begin(*std::get<0>(*HoldersPtr).Ptr());
                             std::get<0>(Iterators) = 1;
                         }
                     }
