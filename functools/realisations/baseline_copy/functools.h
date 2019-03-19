@@ -1,195 +1,379 @@
 #pragma once
 
-#include <functools_helpers.h>
+#include <reverse.h>
+#include <xrange.h>
+#include <mapped.h>
+#include <filtering.h>
 
-#include <vector>
+#include <tuple>
+
+#define Y_LIKELY(Cond) __builtin_expect(!!(Cond), 1)
+#define Y_UNLIKELY(Cond) __builtin_expect(!!(Cond), 0)
 
 namespace NFuncTools::NPrivate {
+
+    template <typename TContainer>
+    struct TEnumerator {
+        using TStorage = TAutoEmbedOrPtrPolicy<TContainer>;
+        using TValue = std::tuple<const std::size_t&, decltype(*std::begin(std::declval<TContainer&>()))>;
+        using TIteratorState = decltype(std::begin(std::declval<TContainer&>()));
+        using TSentinelState = decltype(std::end(std::declval<TContainer&>()));
+
+        struct TIterator;
+        struct TSentinelCandidate {
+            std::size_t Index;
+            TSentinelState Iterator;
+        };
+        using TSentinel = typename std::conditional_t<
+            std::is_same_v<TIteratorState, TSentinelState>, TIterator, TSentinelCandidate>;
+
+        struct TIterator {
+            using difference_type = std::ptrdiff_t;
+            using value_type = TValue;
+            using pointer = TValue*;
+            using reference = TValue&;
+            using iterator_category = std::input_iterator_tag;
+
+            TValue operator*() {
+                return {Index, *Iterator};
+            }
+            TValue operator*() const {
+                return {Index, *Iterator};
+            }
+            void operator++() {
+                ++Index;
+                ++Iterator;
+            }
+            bool operator!=(const TSentinel& other) const {
+                return Iterator != other.Iterator;
+            }
+            bool operator==(const TSentinel& other) const {
+                return Iterator == other.Iterator;
+            }
+
+            std::size_t Index;
+            TIteratorState Iterator;
+        };
+
+        using iterator = TIterator;
+        using const_iterator = TIterator;
+
+        TIterator begin() const {
+            return {0, std::begin(*Storage.Ptr())};
+        }
+
+        TSentinel end() const {
+            return {~0u, std::end(*Storage.Ptr())};
+        }
+
+        mutable TStorage Storage;
+    };
+
+
+    template <typename TContainer, typename TIteratorCategory = typename std::iterator_traits<decltype(std::begin(std::declval<TContainer>()))>::iterator_category>
+    static constexpr bool HasRandomAccessIterator(int32_t) {
+        return std::is_same_v<TIteratorCategory, std::random_access_iterator_tag>;
+    }
+
+    template <typename TContainer>
+    static constexpr bool HasRandomAccessIterator(uint32_t) {
+        return false;
+    }
+
     template <typename... TContainers>
     struct TZipper {
+        template <std::size_t... I>
+        struct TZipperWithIndex {
+            using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
+            using TValue = std::tuple<decltype(*std::begin(std::declval<TContainers&>()))...>;
+            using TIteratorState = std::tuple<decltype(std::begin(std::declval<TContainers&>()))...>;
+            using TSentinelState = std::tuple<decltype(std::end(std::declval<TContainers&>()))...>;
 
-        template <typename TContainer, typename TIteratorCategory = typename std::iterator_traits<decltype(std::declval<TContainer>().begin())>::iterator_category>
-        static constexpr bool HasRandomAccessIterator(int32_t) {
-            return std::is_same<TIteratorCategory, std::random_access_iterator_tag>::value;
-        }
+            static constexpr bool TrivialSentinel = std::is_same_v<TIteratorState, TSentinelState>;
 
-        template <typename TContainer>
-        static constexpr bool HasRandomAccessIterator(uint32_t) {
-            return false;
-        }
+            struct TIterator;
+            struct TSentinelCandidate {
+                TSentinelState Iterators;
+            };
+            using TSentinel = std::conditional_t<TrivialSentinel, TIterator, TSentinelCandidate>;
+
+            static constexpr bool LimitByFirstContainer = TrivialSentinel &&
+                (HasRandomAccessIterator<TContainers>(0) && ...);
+
+            struct TIterator {
+                using difference_type = std::ptrdiff_t;
+                using value_type = TValue;
+                using pointer = TValue*;
+                using reference = TValue&;
+                using iterator_category = std::input_iterator_tag;
+
+                TValue operator*() {
+                    return {*std::get<I>(Iterators)...};
+                }
+                void operator++() {
+                    (++std::get<I>(Iterators), ...);
+                }
+                bool operator!=(const TSentinel& other) const {
+                    if constexpr (LimitByFirstContainer) {
+                        return std::get<0>(Iterators) != std::get<0>(other.Iterators);
+                    } else {
+                        // yes, for all correct iterators but end() it is a correct way to compare
+                        return ((std::get<I>(Iterators) != std::get<I>(other.Iterators)) && ...);
+                    }
+                }
+                bool operator==(const TSentinel& other) const {
+                    return !(*this != other);
+                }
+
+                TIteratorState Iterators;
+            };
+
+            using iterator = TIterator;
+            using const_iterator = TIterator;
+
+            TIterator begin() const {
+                return {TIteratorState{std::begin(*std::get<I>(Holders).Ptr())...}};
+            }
+
+            TSentinel end() const {
+                if constexpr (LimitByFirstContainer) {
+                    auto endOfFirst = std::begin(*std::get<0>(Holders).Ptr()) + std::min({
+                        std::end(*std::get<I>(Holders).Ptr()) - std::begin(*std::get<I>(Holders).Ptr())...});
+                    TIterator iter{TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}};
+                    std::get<0>(iter.Iterators) = endOfFirst;
+                    return iter;
+                } else {
+                    return {TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}};
+                }
+            }
+
+            mutable THolders Holders;
+        };
 
         template <std::size_t... I>
         static auto Zip(TContainers&&... containers, std::index_sequence<I...>) {
-            using namespace NHelpers;
-
-            return TGeneratorRange(
-                [holders = std::tuple{TAutoEmbedOrPtrPolicy<TContainers>(containers)...}]() mutable {
-                    auto iters = std::tuple{std::get<I>(holders).Ptr()->begin()...};
-                    if constexpr ((HasRandomAccessIterator<TContainers>(0) && ...)) {
-                        auto endOfFirst = std::get<0>(holders).Ptr()->begin() + std::min({
-                            std::get<I>(holders).Ptr()->end() - std::get<I>(holders).Ptr()->begin()...});
-                        return TGeneratorRangeIterator(
-                            [&holders, iters, endOfFirst](auto query) mutable {
-                                if constexpr (query.GetCurrent) {
-                                    // std::forward_as_tuple is bad idea, because we should not take references to objects that are not returned by reference
-                                    return std::tuple<decltype(*std::declval<TContainers>().begin())...>(*std::get<I>(iters)...);
-                                }
-                                if constexpr (query.IsNotEnd) {
-                                    return std::get<0>(iters) != endOfFirst;
-                                }
-                                if constexpr (query.Next) {
-                                    (++std::get<I>(iters), ...);
-                                }
-                            });
-                    } else {
-                        return TGeneratorRangeIterator(
-                        [&holders, iters](auto query) mutable {
-                            if constexpr (query.GetCurrent) {
-                                // std::forward_as_tuple is bad idea, because we should not take references to objects that are not returned by reference
-                                return std::tuple<decltype(*std::declval<TContainers>().begin())...>(*std::get<I>(iters)...);
-                            }
-                            if constexpr (query.IsNotEnd) {
-                                return ((std::get<I>(iters) != std::get<I>(holders).Ptr()->end()) && ...);
-                            }
-                            if constexpr (query.Next) {
-                                (++std::get<I>(iters), ...);
-                            }
-                        });
-                    }
-                });
-
+            return TZipperWithIndex<I...>{{std::forward<TContainers>(containers)...}};
         }
     };
+
 
     template <typename... TContainers>
     struct TCartesianMultiplier {
-        //! Return value is true when iteration is finished
-        template <typename TIteratorsTuple, typename THoldersTuple,
-                  std::size_t position = std::tuple_size<TIteratorsTuple>::value - 1>
-        static bool IncrementIteratorsTuple(TIteratorsTuple& iteratorsTuple, THoldersTuple& holdersTuple) {
-            auto& currentIterator = std::get<position>(iteratorsTuple);
-            ++currentIterator.Get();
+        template <std::size_t... I>
+        struct TCartesianMultiplierWithIndex {
+            using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
+            using TValue = std::tuple<decltype(*std::begin(std::declval<TContainers&>()))...>;
+            using TIteratorState = std::tuple<int, decltype(std::begin(std::declval<TContainers&>()))...>;
+            using TSentinelState = std::tuple<int, decltype(std::end(std::declval<TContainers&>()))...>;
 
-            if (currentIterator.Get() != std::get<position>(holdersTuple).Ptr()->end()) {
-                return false;
-            } else {
-                currentIterator = std::get<position>(holdersTuple).Ptr()->begin();
-                if constexpr (position == 0) {
-                    return true;
-                } else {
-                    return IncrementIteratorsTuple<TIteratorsTuple, THoldersTuple, position - 1>(iteratorsTuple, holdersTuple);
+            struct TIterator;
+            struct TSentinelCandidate {
+                TSentinelState Iterators;
+                THolders* HoldersPtr;
+            };
+            using TSentinel = typename std::conditional_t<
+                std::is_same_v<TIteratorState, TSentinelState>, TIterator, TSentinelCandidate>;
+
+            struct TIterator {
+                using difference_type = std::ptrdiff_t;
+                using value_type = TValue;
+                using pointer = TValue*;
+                using reference = TValue&;
+                using iterator_category = std::input_iterator_tag;
+
+                //! Return value is true when iteration is not finished
+                template <std::size_t position = sizeof...(TContainers)>
+                void IncrementIteratorsTuple() {
+                    auto& currentIterator = std::get<position>(Iterators);
+                    ++currentIterator;
+
+                    if (currentIterator != std::end(*std::get<position - 1>(*HoldersPtr).Ptr())) {
+                        return;
+                    } else {
+                        currentIterator = std::begin(*std::get<position - 1>(*HoldersPtr).Ptr());
+                        if constexpr (position != 1) {
+                            IncrementIteratorsTuple<position - 1>();
+                        } else {
+                            std::get<0>(Iterators) = 1;
+                        }
+                    }
                 }
+
+                TValue operator*() {
+                    return {*std::get<I + 1>(Iterators)...};
+                }
+                void operator++() {
+                    IncrementIteratorsTuple();
+                }
+                bool operator!=(const TSentinel& other) const {
+                    // not finished iterator VS sentinel (most frequent case)
+                    if (std::get<0>(Iterators) != std::get<0>(other.Iterators)) {
+                        return true;
+                    }
+                    // do not compare sentinels and finished iterators
+                    if (std::get<0>(other.Iterators)) {
+                        return false;
+                    }
+                    // compare not finished iterators
+                    return ((std::get<I + 1>(Iterators) != std::get<I + 1>(other.Iterators)) || ...);
+                }
+                bool operator==(const TSentinel& other) const {
+                    return !(*this != other);
+                }
+
+                TIteratorState Iterators;
+                THolders* HoldersPtr;
+            };
+
+            using iterator = TIterator;
+            using const_iterator = TIterator;
+
+            TIterator begin() const {
+                bool isEmpty = !((std::begin(*std::get<I>(Holders).Ptr()) != std::end(*std::get<I>(Holders).Ptr())) && ...);
+                return {TIteratorState{int(isEmpty), std::begin(*std::get<I>(Holders).Ptr())...}, &Holders};
             }
-        }
+
+            TSentinel end() const {
+                return {TSentinelState{1, std::end(*std::get<I>(Holders).Ptr())...}, &Holders};
+            }
+
+            mutable THolders Holders;
+        };
 
         template <std::size_t... I>
         static auto CartesianMultiply(TContainers&&... containers, std::index_sequence<I...>) {
-            using namespace NHelpers;
-
-            return TGeneratorRange(
-                [holders = std::tuple{TAutoEmbedOrPtrPolicy<TContainers>(containers)...}]() mutable {
-                    auto iters = std::tuple{TCopyAssignableHolder(std::get<I>(holders).Ptr()->begin())...};
-                    bool finished = !((std::get<I>(iters).Get() != std::get<I>(holders).Ptr()->end()) && ...);
-
-                    return TGeneratorRangeIterator(
-                        [&holders, iters, finished](auto query) mutable -> decltype(auto) {
-                            if constexpr (query.GetCurrent) {
-                                return std::tuple<decltype(*std::declval<TContainers>().begin())...>(*std::get<I>(iters).Get()...);
-                            }
-                            if constexpr (query.IsNotEnd) {
-                                return !finished;
-                            }
-                            if constexpr (query.Next) {
-                                finished |= IncrementIteratorsTuple(iters, holders);
-                            }
-                        });
-                });
+            return TCartesianMultiplierWithIndex<I...>{{std::forward<TContainers>(containers)...}};
         }
     };
 
-    template <typename TValue, typename... TContainers>
-    struct TConcatenator {
-        template <std::size_t index = 0, typename TIters>
-        static TValue GetCurrentValue(std::size_t position, TIters& iters) {
-            if constexpr (index >= sizeof...(TContainers)) {
-                // never happened when use of iterator is correct
-                return *std::get<0>(iters);
-            } else {
-                if (position == index) {
-                    return *std::get<index>(iters);
-                } else {
-                    return GetCurrentValue<index + 1>(position, iters);
-                }
-            }
-        }
 
-        template <bool needIncrement, std::size_t index = 0, typename TIters, typename THolders>
-        static void MaybeIncrementIteratorAndSkipExhaustedContainers(std::size_t& position, TIters& iters, THolders& holders) {
-            if constexpr (index >= sizeof...(TContainers)) {
-                return;
-            } else {
-                if (position == index) {
-                    if constexpr (needIncrement) {
-                        ++std::get<index>(iters);
+    template <typename TValue_, typename... TContainers>
+    struct TConcatenator {
+        template <std::size_t... I>
+        struct TConcatenatorWithIndex {
+            using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
+            using TValue = TValue_;
+            using TIteratorState = std::tuple<decltype(std::begin(std::declval<TContainers&>()))...>;
+            using TSentinelState = std::tuple<decltype(std::end(std::declval<TContainers&>()))...>;
+
+            struct TIterator;
+            struct TSentinelCandidate {
+                TSentinelState Iterators;
+                std::size_t Position;
+                THolders* HoldersPtr;
+            };
+            using TSentinel = typename std::conditional_t<
+                std::is_same_v<TIteratorState, TSentinelState>, TIterator, TSentinelCandidate>;
+
+            struct TIterator {
+                using difference_type = std::ptrdiff_t;
+                using value_type = TValue;
+                using pointer = std::remove_reference_t<TValue>*;
+                using reference = std::remove_reference_t<TValue>&;
+                using iterator_category = std::input_iterator_tag;
+
+                // important, that it is a static function, compiler better optimizes such code
+                template <std::size_t index = 0>
+                static TValue GetCurrentValue(std::size_t position, TIteratorState& iterators) {
+                    if constexpr (index >= sizeof...(TContainers)) {
+                        // never happened when use of iterator is correct
+                        return *std::get<0>(iterators);
+                    } else {
+                        if (position == index) {
+                            return *std::get<index>(iterators);
+                        } else {
+                            return GetCurrentValue<index + 1>(position, iterators);
+                        }
                     }
-                    if (std::get<index>(iters) == std::get<index>(holders).Ptr()->end()) {
-                        ++position;
-                        MaybeIncrementIteratorAndSkipExhaustedContainers<false, index + 1>(position, iters, holders);
-                    }
-                } else {
-                    MaybeIncrementIteratorAndSkipExhaustedContainers<needIncrement, index + 1>(position, iters, holders);
                 }
+
+                template <bool needIncrement, std::size_t index = 0>
+                void MaybeIncrementIteratorAndSkipExhaustedContainers() {
+                    if constexpr (index >= sizeof...(TContainers)) {
+                        return;
+                    } else {
+                        if (Position == index) {
+                            if constexpr (needIncrement) {
+                                ++std::get<index>(Iterators);
+                            }
+                            if (!(std::get<index>(Iterators) != std::end(*std::get<index>(*HoldersPtr).Ptr()))) {
+                                ++Position;
+                                MaybeIncrementIteratorAndSkipExhaustedContainers<false, index + 1>();
+                            }
+                        } else {
+                            MaybeIncrementIteratorAndSkipExhaustedContainers<needIncrement, index + 1>();
+                        }
+                    }
+                }
+
+
+                TValue operator*() {
+                    return GetCurrentValue(Position, Iterators);
+                }
+                void operator++() {
+                    MaybeIncrementIteratorAndSkipExhaustedContainers<true>();
+                }
+                bool operator!=(const TSentinel& other) const {
+                    // give compiler an opportunity to optimize sentinel case (-70% of time)
+                    if (other.Position == sizeof...(TContainers)) {
+                        return Position < sizeof...(TContainers);
+                    } else {
+                        return (Position != other.Position ||
+                                ((std::get<I>(Iterators) != std::get<I>(other.Iterators)) || ...));
+                    }
+                }
+                bool operator==(const TSentinel& other) const {
+                    return !(*this != other);
+                }
+
+                TIteratorState Iterators;
+                std::size_t Position;
+                THolders* HoldersPtr;
+            };
+
+            using iterator = TIterator;
+            using const_iterator = TIterator;
+
+            TIterator begin() const {
+                TIterator iterator{TIteratorState{std::begin(*std::get<I>(Holders).Ptr())...}, 0, &Holders};
+                iterator.template MaybeIncrementIteratorAndSkipExhaustedContainers<false>();
+                return iterator;
             }
-        }
+
+            TSentinel end() const {
+                return {TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}, sizeof...(TContainers), &Holders};
+            }
+
+            mutable THolders Holders;
+        };
 
         template <std::size_t... I>
         static auto Concatenate(TContainers&&... containers, std::index_sequence<I...>) {
-            using namespace NHelpers;
-
-             return TGeneratorRange(
-                [holders = std::tuple{TAutoEmbedOrPtrPolicy<TContainers>(containers)...}]() mutable {
-                    auto iters = std::tuple{std::get<I>(holders).Ptr()->begin()...};
-
-                    std::size_t position = 0;
-                    MaybeIncrementIteratorAndSkipExhaustedContainers<false>(position, iters, holders);
-
-                    return TGeneratorRangeIterator(
-                        [&holders, iters, position](auto query) mutable -> decltype(auto) {
-                            if constexpr (query.GetCurrent) {
-                                return GetCurrentValue(position, iters);
-                            }
-                            if constexpr (query.IsNotEnd) {
-                                return position < sizeof...(TContainers);
-                            }
-                            if constexpr (query.Next) {
-                                MaybeIncrementIteratorAndSkipExhaustedContainers<true>(position, iters, holders);
-                            }
-                        });
-                });
+            return TConcatenatorWithIndex<I...>{{std::forward<TContainers>(containers)...}};
         }
     };
+
 
     struct TTupleRecursiveFlattener {
 
         template <class TObject, std::size_t... I>
-        auto FlattenTuple(TObject&& object, std::index_sequence<I...>) {
-            return std::tuple_cat(Flatten(std::get<I>(std::forward<TObject>(object)), 0u)...);
+        static auto FlattenTuple(TObject&& object, std::index_sequence<I...>) {
+            return std::tuple_cat(Flatten(std::forward<std::tuple_element_t<I, std::decay_t<TObject>>>(std::get<I>(object)), 0u)...);
         }
 
-        template <class TObject,
-                  size_t Size = std::tuple_size<typename std::decay<TObject>::type>::value>
-        auto Flatten(TObject&& object, uint32_t) {
+        template <class TObject, size_t Size = std::tuple_size<std::decay_t<TObject>>::value>
+        static auto Flatten(TObject&& object, uint32_t) {
             auto indexes = std::make_index_sequence<Size>{};
             return FlattenTuple(std::forward<TObject>(object), indexes);
         }
 
         template <class TObject>
-        auto Flatten(TObject&& object, char) {
+        static auto Flatten(TObject&& object, char) {
             return std::tuple<TObject>(std::forward<TObject>(object));
         }
 
         template <class TObject>
-        auto operator()(TObject&& object) {
+        auto operator()(TObject&& object) const {
             return Flatten(std::forward<TObject>(object), 0u);
         }
 
@@ -200,108 +384,41 @@ namespace NFuncTools {
     //! Usage: for (auto [i, x] : Enumerate(container)) {...}
     template <typename TContainerOrRef>
     auto Enumerate(TContainerOrRef&& container) {
-        using namespace NHelpers;
-
-        return TGeneratorRange(
-            [holder = TAutoEmbedOrPtrPolicy<TContainerOrRef>{container}]() mutable {
-                return TGeneratorRangeIterator(
-                    [&holder, iter = holder.Ptr()->begin(), i = std::size_t(0)](auto query) mutable {
-                        if constexpr (query.GetCurrent) {
-                            return std::tuple<const std::size_t&, decltype(*iter)>(i, *iter);
-                        }
-                        if constexpr (query.IsNotEnd) {
-                            return iter != holder.Ptr()->end();
-                        }
-                        if constexpr (query.Next) {
-                            ++iter;
-                            ++i;
-                        }
-                    });
-            });
+        return NPrivate::TEnumerator<TContainerOrRef>{std::forward<TContainerOrRef>(container)};
     }
 
-
-    template <typename TContainerOrRef>
-    auto Reversed(TContainerOrRef&& container) {
-        using namespace NHelpers;
-
-        return TGeneratorRange(
-            [holder = TAutoEmbedOrPtrPolicy<TContainerOrRef>{container}]() mutable {
-                return TGeneratorRangeIterator(
-                    [&holder, iter = holder.Ptr()->rbegin()](auto query) mutable {
-                        if constexpr (query.GetCurrent) {
-                            return *iter;
-                        }
-                        if constexpr (query.IsNotEnd) {
-                            return iter != holder.Ptr()->rend();
-                        }
-                        if constexpr (query.Next) {
-                            ++iter;
-                        }
-                    });
-            });
-    }
+    using ::Reversed;
 
     template <typename TValue>
     auto Range(TValue from, TValue to, TValue step) {
-        using namespace NHelpers;
-
-        return TGeneratorRange(
-            [=]() mutable {
-                return TGeneratorRangeIterator(
-                    [i = from, to, step](auto query) mutable {
-                        if constexpr (query.GetCurrent) {
-                            return i;
-                        }
-                        if constexpr (query.IsNotEnd) {
-                            return i < to;
-                        }
-                        if constexpr (query.Next) {
-                            i += step;
-                        }
-                    });
-            });
+        return xrange(from, to, step);
     }
 
     template <typename TValue>
     auto Range(TValue from, TValue to) {
-        return Range(from, to, TValue{1});
+        return xrange(from, to);
     }
 
     template <typename TValue>
     auto Range(TValue to) {
-        return Range(TValue{0}, to, TValue{1});
+        return xrange(to);
     }
 
     //! Acts as pythonic zip, BUT result length is equal to shortest lenght of input containers
     //! Usage: for (auto [ai, bi, ci] : Zip(a, b, c)) {...}
+
     template <typename... TContainers>
     auto Zip(TContainers&&... containers) {
         return NPrivate::TZipper<TContainers...>::Zip(
             std::forward<TContainers>(containers)...,
-            std::make_index_sequence<sizeof...(TContainers)>{});
+            std::make_index_sequence<sizeof...(TContainers)>{}
+        );
     }
 
     //! Usage: for (i32 x : Map([](i32 x) { return x * x; }, a)) {...}
     template <typename TMapper, typename TContainerOrRef>
     auto Map(TMapper&& mapper, TContainerOrRef&& container) {
-        using namespace NHelpers;
-
-        return TGeneratorRange(
-            [holder = TAutoEmbedOrPtrPolicy<TContainerOrRef>{container}, mapper = std::move(mapper)]() mutable {
-                return TGeneratorRangeIterator(
-                    [&holder, iter = holder.Ptr()->begin(), &mapper](auto query) mutable -> decltype(auto) {
-                        if constexpr (query.GetCurrent) {
-                            return mapper(*iter);
-                        }
-                        if constexpr (query.IsNotEnd) {
-                            return iter != holder.Ptr()->end();
-                        }
-                        if constexpr (query.Next) {
-                            ++iter;
-                        }
-                    });
-            });
+        return ::MakeMappedRange(std::forward<TContainerOrRef>(container), std::forward<TMapper>(mapper));
     }
 
     //! Usage: for (auto i : Map<int>(floats)) {...}
@@ -313,36 +430,7 @@ namespace NFuncTools {
     //! Usage: for (i32 x : Filter(predicate, container)) {...}
     template <typename TPredicate, typename TContainerOrRef>
     auto Filter(TPredicate&& predicate, TContainerOrRef&& container) {
-        using namespace NHelpers;
-
-        return TGeneratorRange(
-            [holder = TAutoEmbedOrPtrPolicy<TContainerOrRef>{container}, predicate = std::move(predicate)]() mutable {
-                auto iter = holder.Ptr()->begin();
-                bool notFinished = false;
-                while (true) {
-                    notFinished = (iter != holder.Ptr()->end());
-                    if (!notFinished || predicate(*iter)) {
-                        break;
-                    }
-                    ++iter;
-                }
-
-                return TGeneratorRangeIterator(
-                    [&holder, iter, &predicate, notFinished](auto query) mutable -> decltype(auto) {
-                        if constexpr (query.GetCurrent) {
-                            return *iter;
-                        }
-                        if constexpr (query.IsNotEnd) {
-                            return notFinished;
-                        }
-                        if constexpr (query.Next) {
-                            do {
-                                ++iter;
-                                notFinished = (iter != holder.Ptr()->end());
-                            } while (notFinished && !predicate(*iter));
-                        }
-                    });
-            });
+        return ::MakeFilteringRange(std::forward<TContainerOrRef>(container), std::forward<TPredicate>(predicate));
     }
 
     //! Usage: for (auto [ai, bi] : CartesianProduct(a, b)) {...}
@@ -355,7 +443,7 @@ namespace NFuncTools {
     //! Usage: for (auto x : Concatenate(a, b)) {...}
     template <typename TFirstContainer, typename... TContainers>
     auto Concatenate(TFirstContainer&& container, TContainers&&... containers) {
-        return NPrivate::TConcatenator<decltype(*container.begin()), TFirstContainer, TContainers...>::Concatenate(
+        return NPrivate::TConcatenator<decltype(*std::begin(container)), TFirstContainer, TContainers...>::Concatenate(
             std::forward<TFirstContainer>(container), std::forward<TContainers>(containers)..., std::make_index_sequence<sizeof...(TContainers) + 1>{});
     }
 

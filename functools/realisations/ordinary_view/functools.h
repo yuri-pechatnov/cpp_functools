@@ -10,10 +10,11 @@
 #define Y_LIKELY(Cond) __builtin_expect(!!(Cond), 1)
 #define Y_UNLIKELY(Cond) __builtin_expect(!!(Cond), 0)
 
-namespace NFuncTools::NPrivate {
+namespace NFuncToolsPrivate {
 
     template <typename TContainer>
     struct TEnumerator {
+    private:
         using TStorage = TAutoEmbedOrPtrPolicy<TContainer>;
         using TValue = std::tuple<const std::size_t&, decltype(*std::begin(std::declval<TContainer&>()))>;
         using TIteratorState = decltype(std::begin(std::declval<TContainer&>()));
@@ -21,11 +22,11 @@ namespace NFuncTools::NPrivate {
 
         struct TIterator;
         struct TSentinelCandidate {
-            std::size_t Index;
-            TSentinelState Iterator;
+            std::size_t Index_;
+            TSentinelState Iterator_;
         };
-        using TSentinel = typename std::conditional<
-            std::is_same<TIteratorState, TSentinelState>::value, TIterator, TSentinelCandidate>::type;
+        using TSentinel = std::conditional_t<std::is_same_v<TIteratorState, TSentinelState>,
+                                             TIterator, TSentinelCandidate>;
 
         struct TIterator {
             using difference_type = std::ptrdiff_t;
@@ -35,43 +36,44 @@ namespace NFuncTools::NPrivate {
             using iterator_category = std::input_iterator_tag;
 
             TValue operator*() {
-                return {Index, *Iterator};
+                return {Index_, *Iterator_};
             }
             TValue operator*() const {
-                return {Index, *Iterator};
+                return {Index_, *Iterator_};
             }
             void operator++() {
-                ++Index;
-                ++Iterator;
+                ++Index_;
+                ++Iterator_;
             }
             bool operator!=(const TSentinel& other) const {
-                return Iterator != other.Iterator;
+                return Iterator_ != other.Iterator_;
             }
             bool operator==(const TSentinel& other) const {
-                return Iterator == other.Iterator;
+                return Iterator_ == other.Iterator_;
             }
 
-            std::size_t Index;
-            TIteratorState Iterator;
+            std::size_t Index_;
+            TIteratorState Iterator_;
         };
-
+    public:
         using iterator = TIterator;
+        using const_iterator = TIterator;
 
-        TIterator begin() {
-            return {0, std::begin(*Storage.Ptr())};
+        TIterator begin() const {
+            return {0, std::begin(*Storage_.Ptr())};
         }
 
-        TSentinel end() {
-            return {~0u, std::end(*Storage.Ptr())};
+        TSentinel end() const {
+            return {std::numeric_limits<std::size_t>::max(), std::end(*Storage_.Ptr())};
         }
 
-        TStorage Storage;
+        mutable TStorage Storage_;
     };
 
 
-    template <typename TContainer, typename TIteratorCategory = typename std::iterator_traits<decltype(std::declval<TContainer>().begin())>::iterator_category>
+    template <typename TContainer, typename TIteratorCategory = typename std::iterator_traits<decltype(std::begin(std::declval<TContainer>()))>::iterator_category>
     static constexpr bool HasRandomAccessIterator(int32_t) {
-        return std::is_same<TIteratorCategory, std::random_access_iterator_tag>::value;
+        return std::is_same_v<TIteratorCategory, std::random_access_iterator_tag>;
     }
 
     template <typename TContainer>
@@ -83,6 +85,7 @@ namespace NFuncTools::NPrivate {
     struct TZipper {
         template <std::size_t... I>
         struct TZipperWithIndex {
+        private:
             using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
             using TValue = std::tuple<decltype(*std::begin(std::declval<TContainers&>()))...>;
             using TIteratorState = std::tuple<decltype(std::begin(std::declval<TContainers&>()))...>;
@@ -92,12 +95,17 @@ namespace NFuncTools::NPrivate {
 
             struct TIterator;
             struct TSentinelCandidate {
-                TSentinelState Iterators;
+                TSentinelState Iterators_;
             };
             using TSentinel = std::conditional_t<TrivialSentinel, TIterator, TSentinelCandidate>;
 
+#ifndef _WINDOWS
+            // windows compiler crashes here
             static constexpr bool LimitByFirstContainer = TrivialSentinel &&
-                (HasRandomAccessIterator<TContainers>(0) && ...);
+                ((HasRandomAccessIterator<TContainers>(0)) && ...);
+#else
+            static constexpr bool LimitByFirstContainer = false;
+#endif
 
             struct TIterator {
                 using difference_type = std::ptrdiff_t;
@@ -107,45 +115,46 @@ namespace NFuncTools::NPrivate {
                 using iterator_category = std::input_iterator_tag;
 
                 TValue operator*() {
-                    return {*std::get<I>(Iterators)...};
+                    return {*std::get<I>(Iterators_)...};
                 }
                 void operator++() {
-                    (++std::get<I>(Iterators), ...);
+                    (++std::get<I>(Iterators_), ...);
                 }
                 bool operator!=(const TSentinel& other) const {
                     if constexpr (LimitByFirstContainer) {
-                        return std::get<0>(Iterators) != std::get<0>(other.Iterators);
+                        return std::get<0>(Iterators_) != std::get<0>(other.Iterators_);
                     } else {
                         // yes, for all correct iterators but end() it is a correct way to compare
-                        return ((std::get<I>(Iterators) != std::get<I>(other.Iterators)) && ...);
+                        return ((std::get<I>(Iterators_) != std::get<I>(other.Iterators_)) && ...);
                     }
                 }
                 bool operator==(const TSentinel& other) const {
                     return !(*this != other);
                 }
 
-                TIteratorState Iterators;
+                TIteratorState Iterators_;
             };
-
+        public:
             using iterator = TIterator;
+            using const_iterator = TIterator;
 
-            TIterator begin() {
-                return {TIteratorState{std::begin(*std::get<I>(Holders).Ptr())...}};
+            TIterator begin() const {
+                return {TIteratorState{std::begin(*std::get<I>(Holders_).Ptr())...}};
             }
 
-            TSentinel end() {
+            TSentinel end() const {
                 if constexpr (LimitByFirstContainer) {
-                    auto endOfFirst = std::begin(*std::get<0>(Holders).Ptr()) + std::min({
-                        std::end(*std::get<I>(Holders).Ptr()) - std::begin(*std::get<I>(Holders).Ptr())...});
-                    TIterator iter{TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}};
-                    std::get<0>(iter.Iterators) = endOfFirst;
+                    auto endOfFirst = std::begin(*std::get<0>(Holders_).Ptr()) + std::min({
+                        std::end(*std::get<I>(Holders_).Ptr()) - std::begin(*std::get<I>(Holders_).Ptr())...});
+                    TIterator iter{TSentinelState{std::end(*std::get<I>(Holders_).Ptr())...}};
+                    std::get<0>(iter.Iterators_) = endOfFirst;
                     return iter;
                 } else {
-                    return {TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}};
+                    return {TSentinelState{std::end(*std::get<I>(Holders_).Ptr())...}};
                 }
             }
 
-            THolders Holders;
+            mutable THolders Holders_;
         };
 
         template <std::size_t... I>
@@ -159,6 +168,7 @@ namespace NFuncTools::NPrivate {
     struct TCartesianMultiplier {
         template <std::size_t... I>
         struct TCartesianMultiplierWithIndex {
+        private:
             using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
             using TValue = std::tuple<decltype(*std::begin(std::declval<TContainers&>()))...>;
             using TIteratorState = std::tuple<int, decltype(std::begin(std::declval<TContainers&>()))...>;
@@ -166,75 +176,77 @@ namespace NFuncTools::NPrivate {
 
             struct TIterator;
             struct TSentinelCandidate {
-                TSentinelState Iterators;
-                THolders* HoldersPtr;
+                TSentinelState Iterators_;
+                THolders* HoldersPtr_;
             };
-            using TSentinel = typename std::conditional<
-                std::is_same<TIteratorState, TSentinelState>::value, TIterator, TSentinelCandidate>::type;
+            using TSentinel = std::conditional_t<std::is_same_v<TIteratorState, TSentinelState>,
+                                                 TIterator, TSentinelCandidate>;
 
             struct TIterator {
+            private:
+                //! Return value is true when iteration is not finished
+                template <std::size_t position = sizeof...(TContainers)>
+                void IncrementIteratorsTuple() {
+                    auto& currentIterator = std::get<position>(Iterators_);
+                    ++currentIterator;
+
+                    if (currentIterator != std::end(*std::get<position - 1>(*HoldersPtr_).Ptr())) {
+                        return;
+                    } else {
+                        currentIterator = std::begin(*std::get<position - 1>(*HoldersPtr_).Ptr());
+                        if constexpr (position != 1) {
+                            IncrementIteratorsTuple<position - 1>();
+                        } else {
+                            std::get<0>(Iterators_) = 1;
+                        }
+                    }
+                }
+            public:
                 using difference_type = std::ptrdiff_t;
                 using value_type = TValue;
                 using pointer = TValue*;
                 using reference = TValue&;
                 using iterator_category = std::input_iterator_tag;
 
-                //! Return value is true when iteration is not finished
-                template <std::size_t position = std::tuple_size<TIteratorState>::value - 1>
-                void IncrementIteratorsTuple() {
-                    auto& currentIterator = std::get<position>(Iterators);
-                    ++currentIterator;
-
-                    if (currentIterator != std::end(*std::get<position - 1>(*HoldersPtr).Ptr())) {
-                        return;
-                    } else {
-                        currentIterator = std::begin(*std::get<position - 1>(*HoldersPtr).Ptr());
-                        if constexpr (position != 1) {
-                            IncrementIteratorsTuple<position - 1>();
-                        } else {
-                            std::get<0>(Iterators) = 1;
-                        }
-                    }
-                }
-
                 TValue operator*() {
-                    return {*std::get<I + 1>(Iterators)...};
+                    return {*std::get<I + 1>(Iterators_)...};
                 }
                 void operator++() {
                     IncrementIteratorsTuple();
                 }
                 bool operator!=(const TSentinel& other) const {
                     // not finished iterator VS sentinel (most frequent case)
-                    if (std::get<0>(Iterators) != std::get<0>(other.Iterators)) {
+                    if (std::get<0>(Iterators_) != std::get<0>(other.Iterators_)) {
                         return true;
                     }
                     // do not compare sentinels and finished iterators
-                    if (std::get<0>(other.Iterators)) {
+                    if (std::get<0>(other.Iterators_)) {
                         return false;
                     }
                     // compare not finished iterators
-                    return ((std::get<I + 1>(Iterators) != std::get<I + 1>(other.Iterators)) || ...);
+                    return ((std::get<I + 1>(Iterators_) != std::get<I + 1>(other.Iterators_)) || ...);
                 }
                 bool operator==(const TSentinel& other) const {
                     return !(*this != other);
                 }
 
-                TIteratorState Iterators;
-                THolders* HoldersPtr;
+                TIteratorState Iterators_;
+                THolders* HoldersPtr_;
             };
-
+        public:
             using iterator = TIterator;
+            using const_iterator = TIterator;
 
-            TIterator begin() {
-                bool isEmpty = !((std::begin(*std::get<I>(Holders).Ptr()) != std::end(*std::get<I>(Holders).Ptr())) && ...);
-                return {TIteratorState{int(isEmpty), std::begin(*std::get<I>(Holders).Ptr())...}, &Holders};
+            TIterator begin() const {
+                bool isEmpty = !((std::begin(*std::get<I>(Holders_).Ptr()) != std::end(*std::get<I>(Holders_).Ptr())) && ...);
+                return {TIteratorState{int(isEmpty), std::begin(*std::get<I>(Holders_).Ptr())...}, &Holders_};
             }
 
-            TSentinel end() {
-                return {TSentinelState{1, std::end(*std::get<I>(Holders).Ptr())...}, &Holders};
+            TSentinel end() const {
+                return {TSentinelState{1, std::end(*std::get<I>(Holders_).Ptr())...}, &Holders_};
             }
 
-            THolders Holders;
+            mutable THolders Holders_;
         };
 
         template <std::size_t... I>
@@ -248,6 +260,7 @@ namespace NFuncTools::NPrivate {
     struct TConcatenator {
         template <std::size_t... I>
         struct TConcatenatorWithIndex {
+        private:
             using THolders = std::tuple<TAutoEmbedOrPtrPolicy<TContainers>...>;
             using TValue = TValue_;
             using TIteratorState = std::tuple<decltype(std::begin(std::declval<TContainers&>()))...>;
@@ -255,19 +268,16 @@ namespace NFuncTools::NPrivate {
 
             struct TIterator;
             struct TSentinelCandidate {
-                TSentinelState Iterators;
-                std::size_t Position;
-                THolders* HoldersPtr;
+                TSentinelState Iterators_;
+                std::size_t Position_;
+                THolders* HoldersPtr_;
             };
-            using TSentinel = typename std::conditional<
-                std::is_same<TIteratorState, TSentinelState>::value, TIterator, TSentinelCandidate>::type;
+            using TSentinel = std::conditional_t<std::is_same_v<TIteratorState, TSentinelState>,
+                                                 TIterator, TSentinelCandidate>;
 
             struct TIterator {
-                using difference_type = std::ptrdiff_t;
-                using value_type = TValue;
-                using pointer = std::remove_reference_t<TValue>*;
-                using reference = std::remove_reference_t<TValue>&;
-                using iterator_category = std::input_iterator_tag;
+            private:
+                friend struct TConcatenatorWithIndex<I...>;
 
                 // important, that it is a static function, compiler better optimizes such code
                 template <std::size_t index = 0>
@@ -289,12 +299,12 @@ namespace NFuncTools::NPrivate {
                     if constexpr (index >= sizeof...(TContainers)) {
                         return;
                     } else {
-                        if (Position == index) {
+                        if (Position_ == index) {
                             if constexpr (needIncrement) {
-                                ++std::get<index>(Iterators);
+                                ++std::get<index>(Iterators_);
                             }
-                            if (!(std::get<index>(Iterators) != std::end(*std::get<index>(*HoldersPtr).Ptr()))) {
-                                ++Position;
+                            if (!(std::get<index>(Iterators_) != std::end(*std::get<index>(*HoldersPtr_).Ptr()))) {
+                                ++Position_;
                                 MaybeIncrementIteratorAndSkipExhaustedContainers<false, index + 1>();
                             }
                         } else {
@@ -302,45 +312,51 @@ namespace NFuncTools::NPrivate {
                         }
                     }
                 }
-
+            public:
+                using difference_type = std::ptrdiff_t;
+                using value_type = TValue;
+                using pointer = std::remove_reference_t<TValue>*;
+                using reference = std::remove_reference_t<TValue>&;
+                using iterator_category = std::input_iterator_tag;
 
                 TValue operator*() {
-                    return GetCurrentValue(Position, Iterators);
+                    return GetCurrentValue(Position_, Iterators_);
                 }
                 void operator++() {
                     MaybeIncrementIteratorAndSkipExhaustedContainers<true>();
                 }
                 bool operator!=(const TSentinel& other) const {
                     // give compiler an opportunity to optimize sentinel case (-70% of time)
-                    if (other.Position == sizeof...(TContainers)) {
-                        return Position < sizeof...(TContainers);
+                    if (other.Position_ == sizeof...(TContainers)) {
+                        return Position_ < sizeof...(TContainers);
                     } else {
-                        return (Position != other.Position ||
-                                ((std::get<I>(Iterators) != std::get<I>(other.Iterators)) || ...));
+                        return (Position_ != other.Position_ ||
+                                ((std::get<I>(Iterators_) != std::get<I>(other.Iterators_)) || ...));
                     }
                 }
                 bool operator==(const TSentinel& other) const {
                     return !(*this != other);
                 }
 
-                TIteratorState Iterators;
-                std::size_t Position;
-                THolders* HoldersPtr;
+                TIteratorState Iterators_;
+                std::size_t Position_;
+                THolders* HoldersPtr_;
             };
-
+        public:
             using iterator = TIterator;
+            using const_iterator = TIterator;
 
-            TIterator begin() {
-                TIterator iterator{TIteratorState{std::begin(*std::get<I>(Holders).Ptr())...}, 0, &Holders};
+            TIterator begin() const {
+                TIterator iterator{TIteratorState{std::begin(*std::get<I>(Holders_).Ptr())...}, 0, &Holders_};
                 iterator.template MaybeIncrementIteratorAndSkipExhaustedContainers<false>();
                 return iterator;
             }
 
-            TSentinel end() {
-                return {TSentinelState{std::end(*std::get<I>(Holders).Ptr())...}, sizeof...(TContainers), &Holders};
+            TSentinel end() const {
+                return {TSentinelState{std::end(*std::get<I>(Holders_).Ptr())...}, sizeof...(TContainers), &Holders_};
             }
 
-            THolders Holders;
+            mutable THolders Holders_;
         };
 
         template <std::size_t... I>
@@ -357,8 +373,7 @@ namespace NFuncTools::NPrivate {
             return std::tuple_cat(Flatten(std::forward<std::tuple_element_t<I, std::decay_t<TObject>>>(std::get<I>(object)), 0u)...);
         }
 
-        template <class TObject,
-                  size_t Size = std::tuple_size<typename std::decay<TObject>::type>::value>
+        template <class TObject, size_t Size = std::tuple_size<std::decay_t<TObject>>::value>
         static auto Flatten(TObject&& object, uint32_t) {
             auto indexes = std::make_index_sequence<Size>{};
             return FlattenTuple(std::forward<TObject>(object), indexes);
@@ -381,13 +396,10 @@ namespace NFuncTools {
     //! Usage: for (auto [i, x] : Enumerate(container)) {...}
     template <typename TContainerOrRef>
     auto Enumerate(TContainerOrRef&& container) {
-        return NPrivate::TEnumerator<TContainerOrRef>{std::forward<TContainerOrRef>(container)};
+        return NFuncToolsPrivate::TEnumerator<TContainerOrRef>{std::forward<TContainerOrRef>(container)};
     }
 
-    template <typename TContainerOrRef>
-    auto Reversed(TContainerOrRef&& container) {
-        return ::Reversed(std::forward<TContainerOrRef>(container));
-    }
+    using ::Reversed;
 
     template <typename TValue>
     auto Range(TValue from, TValue to, TValue step) {
@@ -409,7 +421,7 @@ namespace NFuncTools {
 
     template <typename... TContainers>
     auto Zip(TContainers&&... containers) {
-        return NPrivate::TZipper<TContainers...>::Zip(
+        return NFuncToolsPrivate::TZipper<TContainers...>::Zip(
             std::forward<TContainers>(containers)...,
             std::make_index_sequence<sizeof...(TContainers)>{}
         );
@@ -418,7 +430,7 @@ namespace NFuncTools {
     //! Usage: for (i32 x : Map([](i32 x) { return x * x; }, a)) {...}
     template <typename TMapper, typename TContainerOrRef>
     auto Map(TMapper&& mapper, TContainerOrRef&& container) {
-        return ::MakeSimpleMappedRange(std::forward<TContainerOrRef>(container), std::forward<TMapper>(mapper));
+        return ::MakeMappedRange(std::forward<TContainerOrRef>(container), std::forward<TMapper>(mapper));
     }
 
     //! Usage: for (auto i : Map<int>(floats)) {...}
@@ -437,20 +449,20 @@ namespace NFuncTools {
     //! Equivalent: for (auto& ai : a) { for (auto& bi : b) {...} }
     template <typename... TContainers>
     auto CartesianProduct(TContainers&&... containers) {
-        return NPrivate::TCartesianMultiplier<TContainers...>::CartesianMultiply(std::forward<TContainers>(containers)..., std::make_index_sequence<sizeof...(TContainers)>{});
+        return NFuncToolsPrivate::TCartesianMultiplier<TContainers...>::CartesianMultiply(std::forward<TContainers>(containers)..., std::make_index_sequence<sizeof...(TContainers)>{});
     }
 
     //! Usage: for (auto x : Concatenate(a, b)) {...}
     template <typename TFirstContainer, typename... TContainers>
     auto Concatenate(TFirstContainer&& container, TContainers&&... containers) {
-        return NPrivate::TConcatenator<decltype(*std::begin(container)), TFirstContainer, TContainers...>::Concatenate(
+        return NFuncToolsPrivate::TConcatenator<decltype(*std::begin(container)), TFirstContainer, TContainers...>::Concatenate(
             std::forward<TFirstContainer>(container), std::forward<TContainers>(containers)..., std::make_index_sequence<sizeof...(TContainers) + 1>{});
     }
 
     //! Usage: for (auto [i, ai, bi] : Flatten(Enumerate(Zip(a, b))) {...}
     template <typename TContainerOrRef>
     auto Flatten(TContainerOrRef&& container) {
-        return Map(NPrivate::TTupleRecursiveFlattener{}, std::forward<TContainerOrRef>(container));
+        return Map(NFuncToolsPrivate::TTupleRecursiveFlattener{}, std::forward<TContainerOrRef>(container));
     }
 
 }

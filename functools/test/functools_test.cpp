@@ -5,6 +5,9 @@
 #include <vector>
 #include <set>
 
+#define Y_UNUSED(x) ((void) x);
+
+
 #if !defined(native_REALISATION)
 
 using namespace NFuncTools;
@@ -60,6 +63,17 @@ void TestViewCompileability(TContainerObjOrRef&& container) {
 
     // std compatibility
     ToVector(container);
+
+    #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION) && !defined(range_v3_REALISATION) && !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION)
+    // const iterators
+    [](const auto& cont) {
+        auto constBeginIterator = cont.begin();
+        auto constEndIterator = cont.end();
+        static_assert(std::is_same_v<decltype(constBeginIterator), typename TContainer::const_iterator>);
+        Y_UNUSED(constBeginIterator);
+        Y_UNUSED(constEndIterator);
+    }(container);
+    #endif
 }
 
 
@@ -346,6 +360,13 @@ TEST_F(TestFunctools, Filter) {
 
         ASSERT_EQ(b, c);
     }
+
+    std::vector c = {2, 3, 4};
+    auto pp = [i = int(0)](auto& x) mutable { return ++i < 2; };
+    const auto f = Filter(std::move(pp), c);
+    for (auto&x : f) {
+        Y_UNUSED(x)
+    }
 }
 
 
@@ -405,6 +426,22 @@ TEST_F(TestFunctools, CompileMap) {
     TestViewCompileability(Map(sqr, container));
     const int arrayContainer[] = {1, 2, 3};
     TestViewCompileability(Map(sqr, arrayContainer));
+}
+#endif
+
+#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+TEST_F(TestFunctools, MapRandomAccess) {
+    auto sqr = [](int x) { return x * x; };
+    {
+        auto container = std::vector{1, 2, 3};
+        auto mapped = Map(sqr, container);
+        ASSERT_TRUE((std::is_same_v<decltype(mapped)::iterator::iterator_category, std::random_access_iterator_tag>));
+    }
+    {
+        auto container = std::set<int>{1, 2, 3};
+        auto mapped = Map(sqr, container);
+        ASSERT_TRUE((std::is_same_v<decltype(mapped)::iterator::iterator_category, std::input_iterator_tag>));
+    }
 }
 #endif
 
@@ -599,7 +636,7 @@ TEST_F(TestFunctools, Combo) {
     }
 
     std::vector a = {0, 1, 2};
-    for (auto [i, j] : Enumerate(NFuncTools::Reversed(a))) {
+    for (auto [i, j] : Enumerate(Reversed(a))) {
         ASSERT_EQ(i, 2 - j);
     }
 
@@ -641,7 +678,7 @@ TEST_F(TestFunctools, Combo) {
     {
         // silly check for palindromness
         auto check = [](const auto& c) {
-            for (auto [x, rx] : Zip(c, NFuncTools::Reversed(c))) {
+            for (auto [x, rx] : Zip(c, Reversed(c))) {
                 if (x != rx) {
                     return false;
                 }

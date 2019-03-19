@@ -22,8 +22,6 @@ public:
         Grep();
     }
 
-    TSelf& operator=(const TSelf&) = default;
-
     TSelf& operator++() {
         ++Iter;
         Grep();
@@ -62,14 +60,7 @@ class TFilteringRange {
     using TContainerStorage = TAutoEmbedOrPtrPolicy<TContainer>;
     using TConditionStorage = TAutoEmbedOrPtrPolicy<TCondition>;
     using TRawIterator = decltype(std::begin(std::declval<TContainer&>()));
-
-    struct TConditionWrapper {
-        template <class T>
-        bool operator()(T&& x) const {
-            return (*Condition)(std::forward<T>(x));
-        }
-        std::remove_reference_t<TCondition>* Condition;
-    };
+    using TConditionWrapper = std::reference_wrapper<std::remove_reference_t<TCondition>>;
 public:
     using TIterator = TFilteringIterator<TRawIterator, TConditionWrapper>;
     using iterator = TIterator;
@@ -80,17 +71,17 @@ public:
         , Condition(std::forward<TCondition>(predicate))
     {}
 
-    TIterator begin() {
-        return {std::begin(*Container.Ptr()), std::end(*Container.Ptr()), {Condition.Ptr()}};
+    TIterator begin() const {
+        return {std::begin(*Container.Ptr()), std::end(*Container.Ptr()), TConditionWrapper{*Condition.Ptr()}};
     }
 
-    TIterator end() {
-        return {std::end(*Container.Ptr()), std::end(*Container.Ptr()), {Condition.Ptr()}};
+    TIterator end() const {
+        return {std::end(*Container.Ptr()), std::end(*Container.Ptr()), TConditionWrapper{*Condition.Ptr()}};
     }
 
 private:
-    TContainerStorage Container;
-    TConditionStorage Condition;
+    mutable TContainerStorage Container;
+    mutable TConditionStorage Condition;
 };
 
 

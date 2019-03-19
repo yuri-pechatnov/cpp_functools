@@ -4,19 +4,29 @@
 #include <iterator_range.h>
 #include <store_policy.h>
 
+
+namespace NPrivate {
+    template <class TIterator>
+    constexpr bool HasRandomAccess() {
+        return std::is_same_v<typename std::iterator_traits<TIterator>::iterator_category,
+                              std::random_access_iterator_tag>;
+    }
+};
+
+
 template <class TIterator, class TMapper>
 class TMappedIterator {
-public:
     using TSelf = TMappedIterator<TIterator, TMapper>;
-
     using TSrcPointerType = typename std::iterator_traits<TIterator>::reference;
     using TValue = decltype(std::declval<TMapper>()(std::declval<TSrcPointerType>()));
-
+public:
     using difference_type = std::ptrdiff_t;
     using value_type = TValue;
     using reference = TValue&;
     using pointer = std::remove_reference_t<TValue>*;
-    using iterator_category = std::input_iterator_tag;
+
+    using iterator_category = std::conditional_t<NPrivate::HasRandomAccess<TIterator>(),
+        std::random_access_iterator_tag, std::input_iterator_tag>;
 
     TMappedIterator(TIterator it, TMapper mapper)
         : Iter(it)
@@ -79,81 +89,63 @@ private:
 };
 
 
-//! Doesn't support const iterators and some methods, so it has lower requirements to TContainer
 template <class TContainer, class TMapper>
-class TSimpleOwningMappedIteratorRange {
-public:
+class TInputMappedRange {
+protected:
     using TContainerStorage = TAutoEmbedOrPtrPolicy<TContainer>;
     using TMapperStorage = TAutoEmbedOrPtrPolicy<TMapper>;
+    using TMapperWrapper = std::reference_wrapper<std::remove_reference_t<TMapper>>;
     using InternalIterator = decltype(std::begin(std::declval<TContainer&>()));
-
-    struct TMapperWrapper {
-        template <class T>
-        decltype(auto) operator()(T&& x) const {
-            return (*Mapper)(std::forward<T>(x));
-        }
-        std::remove_reference_t<TMapper>* Mapper;
-    };
-
     using Iterator = TMappedIterator<InternalIterator, TMapperWrapper>;
+public:
     using iterator = Iterator;
+    using const_iterator = Iterator;
     using value_type = typename std::iterator_traits<iterator>::value_type;
     using reference = typename std::iterator_traits<iterator>::reference;
-    using difference_type = typename std::iterator_traits<iterator>::difference_type;
+    using const_reference = typename std::iterator_traits<const_iterator>::reference;
 
-    TSimpleOwningMappedIteratorRange(TContainer&& container, TMapper&& mapper)
+    TInputMappedRange(TContainer&& container, TMapper&& mapper)
         : Container(std::forward<TContainer>(container))
         , Mapper(std::forward<TMapper>(mapper))
     {
     }
 
-    Iterator begin() {
-        return {std::begin(*Container.Ptr()), {Mapper.Ptr()}};
+    Iterator begin() const {
+        return {std::begin(*Container.Ptr()), {*Mapper.Ptr()}};
     }
 
-    Iterator end() {
-        return {std::end(*Container.Ptr()), {Mapper.Ptr()}};
+    Iterator end() const {
+        return {std::end(*Container.Ptr()), {*Mapper.Ptr()}};
     }
 
 protected:
-    TContainerStorage Container;
-    TMapperStorage Mapper;
+    mutable TContainerStorage Container;
+    mutable TMapperStorage Mapper;
 };
 
 
 template <class TContainer, class TMapper>
-class TOwningMappedIteratorRange : public TSimpleOwningMappedIteratorRange<TContainer, TMapper> {
-public:
-    using TBase = TSimpleOwningMappedIteratorRange<TContainer, TMapper>;
-
+class TRandomAccessMappedRange : public TInputMappedRange<TContainer, TMapper> {
+    using TBase = TInputMappedRange<TContainer, TMapper>;
     using InternalIterator = typename TBase::InternalIterator;
     using Iterator = typename TBase::Iterator;
+public:
     using iterator = typename TBase::iterator;
+    using const_iterator = typename TBase::const_iterator;
     using value_type = typename TBase::value_type;
     using reference = typename TBase::reference;
-    using difference_type = typename TBase::difference_type;
+    using const_reference = typename TBase::const_reference;
 
+    using difference_type = typename std::iterator_traits<iterator>::difference_type;
     using size_type = std::size_t;
-    using ConstInternalIterator = typename TContainer::const_iterator;
-    using ConstIterator = TMappedIterator<ConstInternalIterator, TMapper>;
-    using const_iterator = ConstIterator;
-    using const_reference = typename std::iterator_traits<const_iterator>::reference;
 
-    TOwningMappedIteratorRange(TContainer&& container, TMapper mapper)
-        : TSimpleOwningMappedIteratorRange<TContainer, TMapper>(std::move(container), std::move(mapper))
+    TRandomAccessMappedRange(TContainer&& container, TMapper&& mapper)
+        : TBase(std::forward<TContainer>(container), std::forward<TMapper>(mapper))
     {
     }
 
     using TBase::begin;
     using TBase::end;
-
-    ConstIterator begin() const {
-        return {std::begin(*this->Container.Ptr()), *this->Mapper.Ptr()};
-    }
-
-    ConstIterator end() const {
-        return {std::end(*this->Container.Ptr()), *this->Mapper.Ptr()};
-    }
 
     bool empty() const {
         return std::end(*this->Container.Ptr()) == std::begin(*this->Container.Ptr());
@@ -187,16 +179,10 @@ auto MakeMappedRange(TIterator begin, TIterator end, TMapper mapper) {
 }
 
 template <class TContainer, class TMapper>
-auto MakeMappedRange(TContainer& container, TMapper mapper) {
-    return MakeMappedRange(std::begin(container), std::end(container), mapper);
-}
-
-template <class TContainer, class TMapper>
 auto MakeMappedRange(TContainer&& container, TMapper&& mapper) {
-    return TOwningMappedIteratorRange<TContainer, TMapper>(std::forward<TContainer>(container), std::forward<TMapper>(mapper));
-}
-
-template <class TContainer, class TMapper>
-auto MakeSimpleMappedRange(TContainer&& container, TMapper&& mapper) {
-    return TSimpleOwningMappedIteratorRange<TContainer, TMapper>(std::forward<TContainer>(container), std::forward<TMapper>(mapper));
+    if constexpr (NPrivate::HasRandomAccess<decltype(std::begin(container))>()) {
+        return TRandomAccessMappedRange<TContainer, TMapper>(std::forward<TContainer>(container), std::forward<TMapper>(mapper));
+    } else {
+        return TInputMappedRange<TContainer, TMapper>(std::forward<TContainer>(container), std::forward<TMapper>(mapper));
+    }
 }
