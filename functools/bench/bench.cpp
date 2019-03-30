@@ -1,5 +1,6 @@
 #include <functools.h>
 #include <json/json.h>
+#include <gdb_bench.h>
 
 #include <sys/resource.h>
 #include <sys/times.h>
@@ -9,23 +10,11 @@
 #include <cassert>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 #if !defined(native_REALISATION)
 using namespace NFuncTools;
 #endif
-
-
-volatile int BenchWithGdbCounter = 0;
-volatile int BenchWithGdbBenchActive = 0;
-
-void BenchWithGdbStartLabel() {
-    BenchWithGdbBenchActive = 1;
-}
-
-void BenchWithGdbFinishLabel() {
-    BenchWithGdbBenchActive = 0;
-    ++BenchWithGdbCounter;
-}
 
 struct TResources {
     double UserProcessorTime;
@@ -42,6 +31,7 @@ double GetProcessorTime() {
 
 
 int metaIterations = 3;
+int basicIterations = 10000;
 
 template <typename TMeasuredFunction>
 Json::Value Measure(TMeasuredFunction&& fun) {
@@ -63,11 +53,11 @@ Json::Value Measure(TMeasuredFunction&& fun) {
 std::vector<int> a, b, c, d;
 
 void InitData() {
-    for (int i = 0; i < 1000000; ++i) {
+    for (int i = 0; i < basicIterations; ++i) {
         a.push_back(i * i * i ^ i);
         b.push_back(i * i * i | i);
     }
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i * i < basicIterations; ++i) {
         c.push_back(i * i * i ^ i);
         d.push_back(i * i * i | i);
     }
@@ -185,6 +175,9 @@ int main(int argc, char** argv) {
     Json::Value args;
     argsStream >> args;
     metaIterations = args["MetaIterations"].asInt();
+    if (args.isMember("BasicIterations")) {
+        basicIterations = args["BasicIterations"].asInt();
+    }
 
     InitData();
     Json::Value report;
@@ -193,16 +186,21 @@ int main(int argc, char** argv) {
     BenchFilter();
 
     #define MEASURE(func) { result[#func] = Measure(&func); }
-        //MEASURE(BenchZip);
+        MEASURE(BenchZip);
         MEASURE(BenchFilter);
         #if !defined(boost_range_REALISATION)
-        //    MEASURE(BenchConcatenate);
+            MEASURE(BenchConcatenate);
         #endif
         #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
-         //   MEASURE(BenchEnumerate);
-         //   MEASURE(BenchCartesianProduct);
+            MEASURE(BenchEnumerate);
+            MEASURE(BenchCartesianProduct);
         #endif
     #undef MEASURE
-    std::cout << report << std::endl;
+    if (args.isMember("OutputFile")) {
+        std::fstream out(args["OutputFile"].asString(), out.trunc | out.out);
+        out << report << std::endl;
+    } else{
+        std::cout << report << std::endl;
+    }
     return 0;
 }

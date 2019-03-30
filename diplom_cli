@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.6
 
 '''
 
@@ -93,6 +93,12 @@ def range_v3_include_path():
 def think_cell_include_path():
     return real_path("think-cell/range")
 
+def gdb_bench_static_lib_path():
+    return real_path("build/gdb_bench.a")
+
+def gdb_bench_include_path():
+    return real_path("functools/gdb_bench_lib")
+
 def default_compilers():
     return ["g++", "clang++"]
 
@@ -153,6 +159,15 @@ def init():
             os.chdir(think_cell_path)
             safe_shell_run("git clone https://github.com/think-cell/range.git")
 
+    with work_in_root_path():
+        if not os.path.exists(gdb_bench_static_lib_path()):
+            obj_file = gdb_bench_static_lib_path() + ".o"
+            obj_file = gdb_bench_static_lib_path() + ".o"
+            safe_shell_run(gcc_cmd(compiler_bin="g++", includes=[]) +
+                           " -c " + os.path.join(gdb_bench_include_path(), "gdb_bench.cpp") +
+                           " -o " + obj_file)
+            safe_shell_run(f"ar -rv {gdb_bench_static_lib_path()} {obj_file}")
+
 
 def run_test(functools_realisations, compilers):
     logging.info("run_test: %s", locals())
@@ -172,9 +187,10 @@ def run_test(functools_realisations, compilers):
                 realisation_include,
             ]
             safe_shell_run(gcc_cmd(includes=includes, compiler_bin=compiler) +
+                           f" {test_source} " +
                            f" {gtest_static_lib_path()} " +
+                           " -isystem -pthread -lpthread "
                            f" -D{realisation}_REALISATION " +
-                           test_source +
                            " -o " + test_binary)
             safe_shell_run(test_binary)
 
@@ -194,12 +210,12 @@ def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, 
         bench_source = real_path("functools/bench/bench.cpp")
         bench_binary = bench_exe_name(realisation, optimize_level, compiler)
         safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(), think_cell_include_path(),
-                                         jsoncpp_include_path(), real_path("functools/util"), realisation_include],
+                                         jsoncpp_include_path(), gdb_bench_include_path(), real_path("functools/util"), realisation_include],
                                compiler_bin=compiler) +
                        f" -O{optimize_level} " +
                        f" -D{realisation}_REALISATION " +
-                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                        bench_source +
+                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                        " -o " + bench_binary)
 
     def run_one_bench(realisation, optimize_level, compiler):
@@ -255,30 +271,34 @@ def run_bench_with_gdb(functools_realisations, compilers, output_file):
         bench_source = real_path("functools/bench/bench.cpp")
         bench_binary = bench_exe_name(realisation, optimize_level, compiler)
         safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(), think_cell_include_path(),
-                                         jsoncpp_include_path(), real_path("functools/util"), realisation_include],
+                                         jsoncpp_include_path(), gdb_bench_include_path(), real_path("functools/util"), realisation_include],
                                compiler_bin=compiler) +
                        f" -g" +
                        f" -O{optimize_level} " +
                        f" -D{realisation}_REALISATION " +
-                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                        bench_source +
+                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} {gdb_bench_static_lib_path()}" +
                        " -o " + bench_binary)
 
     gdb_script = real_path('tmp_build/bench_gdb_script')
     gdb_log = real_path('tmp_build/bench_gdb_log')
-    print_s('''
-        set step-mode on
-        set range-stepping off
-
+    '''
         set logging file {gdb_log}
         set logging redirect on
         set logging overwrite on
         set logging off
         set logging on
+    '''
+    print_s('''
+        set step-mode on
+        set range-stepping off
+
+        set confirm off
+        set pagination off
 
         b BenchWithGdbStartLabel
 
-        set $epoch=0
+        set $epoch = 0
 
         while true
             if ($epoch == 0)
@@ -288,31 +308,55 @@ def run_bench_with_gdb(functools_realisations, compilers, output_file):
             end
             finish
 
-            set $count=0
+            set $count = 0
             while ($pc != BenchWithGdbFinishLabel)
                 stepi
-                set $count=$count+1
+                set $count = $count + 1
             end
 
-            printf "BENCH_WITH_GDB {{\\"Instructions\\": %d, \\"RunId\\": %d}}\\n", $count, $epoch
+            printf "BENCH_WITH_GDB {\\"Instructions\\": %d, \\"RunId\\": %d}\\n", $count, $epoch
+
+            set $epoch = $epoch + 1
         end
         quit
-    '''.format(gdb_log=gdb_log), fname=gdb_script)
+    ''', fname=gdb_script)
+
 
     def run_one_bench(realisation, optimize_level, compiler):
         bench_binary = bench_exe_name(realisation, optimize_level, compiler)
-        args = json.dumps({"MetaIterations": meta_iterations})
+        bench_out = bench_binary + ".out"
 
 
+        def get_gdb_result(basic_iterations):
+            args = json.dumps({"MetaIterations": meta_iterations, "OutputFile": bench_out, "BasicIterations": basic_iterations})
+            bench_keyword = "BENCH_WITH_GDB"
+            cmd = f"gdb --batch --quiet --silent --command {gdb_script} --args {bench_binary} '{args}' | grep {bench_keyword}"
+            gdb_result = run_and_get_output(cmd).decode('ascii')
+            # logging.info("bench_with_gdb result is '%s'", gdb_result)
+            gdb_result = [json.loads(line[len(bench_keyword) + 1:].strip()) for line in gdb_result.split("\n") if len(line) > len(bench_keyword)]
+            gdb_result = {r["RunId"]: r for r in gdb_result}
+            # logging.info("bench_with_gdb result is '%s'", gdb_result)
 
-        batch_result = json.loads(run_and_get_output(f"{bench_binary} '{args}'"))
+            with open(bench_out) as f:
+                batch_result = json.load(f)
+
+            return gdb_result, batch_result
+
+        small_basic_iterations = 50
+        delta_basic_iterations = 100
+        gdb_result_small, batch_result = get_gdb_result(small_basic_iterations)
+        gdb_result_big, batch_result = get_gdb_result(small_basic_iterations + delta_basic_iterations)
+
         for bench, one_result in batch_result["Benchmarks"].items():
-            one_result.update({
+            run_id = one_result["BenchWithGdbRunId"]
+            one_result = {
                 "Bench": bench,
                 "Realisation": realisation,
                 "OptimizeLevel": optimize_level,
                 "Compiler": compiler,
-            })
+                "Instructions": (gdb_result_big[run_id]["Instructions"] - gdb_result_small[run_id]["Instructions"]) / delta_basic_iterations,
+                "ResultHash": one_result["ResultHash"],
+            }
             bench_result.append(one_result)
 
     params = [(compiler, optimize_level, realisation)
@@ -381,9 +425,9 @@ def run_compile_bench(functools_realisations, benchmarks, compilers, bench_repea
                 f" -O{optimize_level} " +
                 f" -D{realisation}_REALISATION " +
                 f" -D{bench}_BENCH " +
+                bench_source +
                 f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
                 " -c " +
-                bench_source +
                 " -o " + bench_result_lib +
                 f" 2>&1 1>{bench_compiler_message}",
                 stderr=subprocess.STDOUT,
