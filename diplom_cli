@@ -69,6 +69,9 @@ def check_functools_realisations(functools_realisations):
 def build_path():
     return real_path("build")
 
+def tmp_build_path():
+    return real_path("tmp_build")
+
 def gtest_include_path():
     return real_path("googletest/googletest/include")
 
@@ -104,6 +107,8 @@ def init():
     with work_in_root_path():
         if not os.path.exists(build_path()):
             os.mkdir(build_path())
+        if not os.path.exists(tmp_build_path()):
+            os.mkdir(tmp_build_path())
 
     with work_in_root_path():
         gtest_path = real_path("googletest")
@@ -182,7 +187,7 @@ def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, 
     bench_result = []
 
     def bench_exe_name(realisation, optimize_level, compiler):
-        return real_path(f"build/bench_{realisation}_{compiler}_o{optimize_level}")
+        return real_path(f"tmp_build/bench_{realisation}_{compiler}_o{optimize_level}")
 
     def prepare_one_bench(realisation, optimize_level, compiler):
         realisation_include = real_path(f"functools/realisations/{realisation}")
@@ -201,6 +206,104 @@ def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, 
         bench_binary = bench_exe_name(realisation, optimize_level, compiler)
 
         args = json.dumps({"MetaIterations": meta_iterations})
+
+        batch_result = json.loads(run_and_get_output(f"{bench_binary} '{args}'"))
+        for bench, one_result in batch_result["Benchmarks"].items():
+            one_result.update({
+                "Bench": bench,
+                "Realisation": realisation,
+                "OptimizeLevel": optimize_level,
+                "Compiler": compiler,
+            })
+            bench_result.append(one_result)
+
+    params = [(compiler, optimize_level, realisation)
+              for compiler in compilers
+              for optimize_level in [2, 3]
+              for realisation in functools_realisations]
+
+    for compiler, optimize_level, realisation in params:
+        prepare_one_bench(realisation, optimize_level, compiler)
+
+    for i in range(bench_repeat):
+        for compiler, optimize_level, realisation in params:
+            run_one_bench(realisation, optimize_level, compiler)
+
+    print_s(json.dumps(bench_result, indent=4), output_file)
+
+    result_hashes = defaultdict(list)
+    for br in bench_result:
+        result_hashes[br["Bench"]].append(br["ResultHash"])
+    for b_name, hashes in result_hashes.items():
+        assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
+
+
+def run_bench_with_gdb(functools_realisations, compilers, output_file):
+    meta_iterations = 1
+    bench_repeat = 1
+    logging.info("run_bench_with_gdb: %s", locals())
+    init()
+
+    check_functools_realisations(functools_realisations)
+    bench_result = []
+
+    def bench_exe_name(realisation, optimize_level, compiler):
+        return real_path(f"tmp_build/bench_with_gdb_{realisation}_{compiler}_o{optimize_level}")
+
+    def prepare_one_bench(realisation, optimize_level, compiler):
+        realisation_include = real_path(f"functools/realisations/{realisation}")
+        bench_source = real_path("functools/bench/bench.cpp")
+        bench_binary = bench_exe_name(realisation, optimize_level, compiler)
+        safe_shell_run(gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(), think_cell_include_path(),
+                                         jsoncpp_include_path(), real_path("functools/util"), realisation_include],
+                               compiler_bin=compiler) +
+                       f" -g" +
+                       f" -O{optimize_level} " +
+                       f" -D{realisation}_REALISATION " +
+                       f" {gtest_static_lib_path()} {jsoncpp_static_lib_path()} " +
+                       bench_source +
+                       " -o " + bench_binary)
+
+    gdb_script = real_path('tmp_build/bench_gdb_script')
+    gdb_log = real_path('tmp_build/bench_gdb_log')
+    print_s('''
+        set step-mode on
+        set range-stepping off
+
+        set logging file {gdb_log}
+        set logging redirect on
+        set logging overwrite on
+        set logging off
+        set logging on
+
+        b BenchWithGdbStartLabel
+
+        set $epoch=0
+
+        while true
+            if ($epoch == 0)
+                run
+            else
+                continue
+            end
+            finish
+
+            set $count=0
+            while ($pc != BenchWithGdbFinishLabel)
+                stepi
+                set $count=$count+1
+            end
+
+            printf "BENCH_WITH_GDB {{\\"Instructions\\": %d, \\"RunId\\": %d}}\\n", $count, $epoch
+        end
+        quit
+    '''.format(gdb_log=gdb_log), fname=gdb_script)
+
+    def run_one_bench(realisation, optimize_level, compiler):
+        bench_binary = bench_exe_name(realisation, optimize_level, compiler)
+        args = json.dumps({"MetaIterations": meta_iterations})
+
+
 
         batch_result = json.loads(run_and_get_output(f"{bench_binary} '{args}'"))
         for bench, one_result in batch_result["Benchmarks"].items():
@@ -266,9 +369,9 @@ def run_compile_bench(functools_realisations, benchmarks, compilers, bench_repea
     def run_one_bench(realisation, bench, optimize_level, compiler):
         realisation_include = real_path(f"functools/realisations/{realisation}")
         params_key = f"{realisation}_{bench}_{compiler}_{optimize_level}"
-        bench_result_report = real_path(f"build/compile_bench_{params_key}.report")
-        bench_result_lib = real_path(f"build/compile_bench_{params_key}.o")
-        bench_compiler_message = real_path(f"build/compile_bench_{params_key}.compiler_message")
+        bench_result_report = real_path(f"tmp_build/compile_bench_{params_key}.report")
+        bench_result_lib = real_path(f"tmp_build/compile_bench_{params_key}.o")
+        bench_compiler_message = real_path(f"tmp_build/compile_bench_{params_key}.compiler_message")
         try:
             _ = run_and_get_output(
                 f"{time_command} --quiet -f '{time_format}' -o {bench_result_report} " +
@@ -404,6 +507,10 @@ if __name__ == "__main__":
         p.add_arg('-m', '--meta_iterations', default=3, type=int)
         p.add_arg('--compilers', nargs='*', default=default_compilers(), type=str)
         p.add_arg('--bench_repeat', default=1, type=int)
+        p.add_arg('-o', '--output_file', default='', type=str)
+    with subparser('bench_with_gdb', run_bench_with_gdb) as p:
+        p.add_arg('-r', '--functools_realisations', nargs='*', default=all_functools_realisations(), type=str)
+        p.add_arg('--compilers', nargs='*', default=default_compilers(), type=str)
         p.add_arg('-o', '--output_file', default='', type=str)
     with subparser('compile_bench', run_compile_bench) as p:
         p.add_arg('-r', '--functools_realisations', nargs='*', default=all_functools_realisations(), type=str)

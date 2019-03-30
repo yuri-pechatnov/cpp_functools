@@ -14,6 +14,19 @@
 using namespace NFuncTools;
 #endif
 
+
+volatile int BenchWithGdbCounter = 0;
+volatile int BenchWithGdbBenchActive = 0;
+
+void BenchWithGdbStartLabel() {
+    BenchWithGdbBenchActive = 1;
+}
+
+void BenchWithGdbFinishLabel() {
+    BenchWithGdbBenchActive = 0;
+    ++BenchWithGdbCounter;
+}
+
 struct TResources {
     double UserProcessorTime;
 };
@@ -32,12 +45,18 @@ int metaIterations = 3;
 
 template <typename TMeasuredFunction>
 Json::Value Measure(TMeasuredFunction&& fun) {
-    double startProcessorTime = GetProcessorTime();
-    int hash = fun();
     Json::Value res;
+    res["BenchWithGdbRunId"] = BenchWithGdbCounter;
+    res["MetaIterations"] = metaIterations;
+
+    double startProcessorTime = GetProcessorTime();
+
+    BenchWithGdbStartLabel();
+    int hash = fun();
+    BenchWithGdbFinishLabel();
+
     res["UserProcessorTime"] = GetProcessorTime() - startProcessorTime;
     res["ResultHash"] = hash;
-    res["MetaIterations"] = metaIterations;
     return res;
 }
 
@@ -173,15 +192,15 @@ int main(int argc, char** argv) {
 
     BenchFilter();
 
-    #define MEASURE(func) result[#func] = Measure(&func);
-        MEASURE(BenchZip);
+    #define MEASURE(func) { result[#func] = Measure(&func); }
+        //MEASURE(BenchZip);
         MEASURE(BenchFilter);
         #if !defined(boost_range_REALISATION)
-            MEASURE(BenchConcatenate);
+        //    MEASURE(BenchConcatenate);
         #endif
         #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
-            MEASURE(BenchEnumerate);
-            MEASURE(BenchCartesianProduct);
+         //   MEASURE(BenchEnumerate);
+         //   MEASURE(BenchCartesianProduct);
         #endif
     #undef MEASURE
     std::cout << report << std::endl;

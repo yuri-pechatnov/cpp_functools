@@ -1,7 +1,8 @@
 #pragma once
 
+#include <util/generic/iterator_range.h>
+#include <util/generic/store_policy.h>
 #include <iterator>
-#include <iterator_range.h>
 
 template <class TIterator, class TCondition>
 class TFilteringIterator {

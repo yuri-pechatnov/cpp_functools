@@ -8,8 +8,6 @@
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/cartesian_product.hpp>
 
-#include <functools_helpers.h>
-
 #include <vector>
 
 

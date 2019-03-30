@@ -225,7 +225,7 @@ TEST_F(TestFunctools, CompileEnumerate) {
 TEST_F(TestFunctools, Zip) {
     std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}},
-        #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION)
+        #if !defined(boost_range_REALISATION) && !defined(think_cell_REALISATION) && !defined(ordinary_view_REALISATION)
         {{1, 2, 3}, {4, 5, 6, 7}},
         {{1, 2, 3, 4}, {4, 5, 6}},
         {{1, 2, 3, 4}, {}},
@@ -273,7 +273,7 @@ TEST_F(TestFunctools, Zip) {
 #if !defined(boost_range_REALISATION)
 TEST_F(TestFunctools, ZipReference) {
     std::vector a = {0, 1, 2};
-    std::vector b = {2, 1, 0, -1};
+    std::vector b = {2, 1, 0};
     for (auto [ai, bi] : Zip(a, b)) {
         ai = bi;
     }
@@ -285,7 +285,7 @@ TEST_F(TestFunctools, ZipReference) {
 TEST_F(TestFunctools, Zip3) {
     std::vector<std::tuple<std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>> ts = {
         {{1, 2, 3}, {4, 5, 6}, {11, 3, 9}},
-        #if !defined(think_cell_REALISATION)
+        #if !defined(think_cell_REALISATION) && !defined(ordinary_view_REALISATION)
         {{1, 2, 3}, {4, 5, 6}, {11, 3}},
         {{1, 2, 3}, {4, 5, 6, 7}, {9, 0}},
         {{1, 2, 3, 4}, {9}, {4, 5, 6}},
@@ -360,13 +360,14 @@ TEST_F(TestFunctools, Filter) {
 
         ASSERT_EQ(b, c);
     }
-
+    #if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(boost_range_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
     std::vector c = {2, 3, 4};
     auto pp = [i = int(0)](auto& x) mutable { return ++i < 2; };
     const auto f = Filter(std::move(pp), c);
-    for (auto&x : f) {
+    for (auto& x : f) {
         Y_UNUSED(x)
     }
+    #endif
 }
 
 
@@ -429,7 +430,7 @@ TEST_F(TestFunctools, CompileMap) {
 }
 #endif
 
-#if !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
+#if !defined(boost_range_REALISATION) && !defined(baseline_REALISATION) && !defined(baseline_copy_REALISATION) && !defined(range_v3_REALISATION) && !defined(think_cell_REALISATION)
 TEST_F(TestFunctools, MapRandomAccess) {
     auto sqr = [](int x) { return x * x; };
     {
