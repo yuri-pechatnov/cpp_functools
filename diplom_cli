@@ -28,6 +28,31 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 
+def increase_prior_cmd():
+    if os.stat("/usr/bin/chrt").st_mode & 0o4000:
+        return "chrt -f 99 "
+    else:
+        logging.error("Don't use 'chrt'. Try set S_ISUID bit to its executable")
+        return ""
+
+
+def get_perf_stat_result(cmd, iters=1):
+    p = subprocess.Popen(["bash", "-c", increase_prior_cmd() + "perf stat -x, -r {} -d {}".format(iters, cmd)],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    # print("STDOUT", stdout)
+    # print("STDERR", stderr.decode('ascii'))
+    ans = {}
+    for line in stderr.decode('ascii').split('\n'):
+        try:
+            val, _, name, _ = line.split(',', 3)
+            ans[name] = float(val)
+        except ValueError:
+            pass
+    return stdout.decode('ascii'), ans
+
+
+
 def root_path():
     return os.path.dirname(os.path.realpath(__file__))
 
