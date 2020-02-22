@@ -183,6 +183,8 @@ def init():
             os.mkdir(think_cell_path)
             os.chdir(think_cell_path)
             safe_shell_run("git clone https://github.com/think-cell/range.git")
+            os.chdir(os.path.join(think_cell_path, "range"))
+            safe_shell_run("git reset --hard 8851a489f9321e6a82b38680d5a2c5222582614c")
 
     with work_in_root_path():
         if not os.path.exists(gdb_bench_static_lib_path()):
@@ -220,7 +222,7 @@ def run_test(functools_realisations, compilers):
             safe_shell_run(test_binary)
 
 
-def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, output_file):
+def run_bench(functools_realisations, compilers, cpu_set_command, meta_iterations, bench_repeat, output_file):
     logging.info("run_bench: %s", locals())
     init()
 
@@ -248,7 +250,7 @@ def run_bench(functools_realisations, compilers, meta_iterations, bench_repeat, 
 
         args = json.dumps({"MetaIterations": meta_iterations})
 
-        batch_result = json.loads(run_and_get_output(f"{bench_binary} '{args}'"))
+        batch_result = json.loads(run_and_get_output(f"{cpu_set_command} {bench_binary} '{args}'"))
         for bench, one_result in batch_result["Benchmarks"].items():
             one_result.update({
                 "Bench": bench,
@@ -405,7 +407,7 @@ def run_bench_with_gdb(functools_realisations, compilers, output_file):
         assert len(set(hashes)) == 1, f"Results are different for benchmark={b_name}"
 
 
-def run_compile_bench(functools_realisations, benchmarks, compilers, bench_repeat, output_file):
+def run_compile_bench(functools_realisations, benchmarks, compilers, cpu_set_command, bench_repeat, output_file):
     logging.info("run_compile_bench: %s", locals())
     init()
 
@@ -443,6 +445,7 @@ def run_compile_bench(functools_realisations, benchmarks, compilers, bench_repea
         bench_compiler_message = real_path(f"tmp_build/compile_bench_{params_key}.compiler_message")
         try:
             _ = run_and_get_output(
+                f"{cpu_set_command} " +
                 f"{time_command} --quiet -f '{time_format}' -o {bench_result_report} " +
                 gcc_cmd(includes=[gtest_include_path(), boost_range_include_path(), range_v3_include_path(), think_cell_include_path(),
                                   jsoncpp_include_path(), real_path("functools/util"), realisation_include],
@@ -519,7 +522,7 @@ def report_bench(input_file, output_file, aggregate_by, filter_by, heatmap):
         import matplotlib.colors as colors
 
         seaborn.set(rc={'figure.figsize':(15,10)})
-        seaborn.heatmap(report, annot=True, cmap="YlOrBr", norm=colors.LogNorm(0, report.max())).get_figure().savefig(output_file)
+        seaborn.heatmap(report, annot=True, cmap="YlOrBr").get_figure().savefig(output_file)
     else:
         print(report)
 
@@ -575,6 +578,7 @@ if __name__ == "__main__":
         p.add_arg('-r', '--functools_realisations', nargs='*', default=all_functools_realisations(), type=str)
         p.add_arg('-m', '--meta_iterations', default=3, type=int)
         p.add_arg('--compilers', nargs='*', default=default_compilers(), type=str)
+        p.add_arg('--cpu_set_command', default="", type=str)
         p.add_arg('--bench_repeat', default=1, type=int)
         p.add_arg('-o', '--output_file', default='', type=str)
     with subparser('bench_with_gdb', run_bench_with_gdb) as p:
@@ -585,6 +589,7 @@ if __name__ == "__main__":
         p.add_arg('-r', '--functools_realisations', nargs='*', default=all_functools_realisations(), type=str)
         p.add_arg('-b', '--benchmarks', nargs='*', default=[], type=str)
         p.add_arg('--compilers', nargs='*', default=default_compilers(), type=str)
+        p.add_arg('--cpu_set_command', default="", type=str)
         p.add_arg('--bench_repeat', default=1, type=int)
         p.add_arg('-o', '--output_file', default='', type=str)
     with subparser('report_bench', report_bench) as p:
