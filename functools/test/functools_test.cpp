@@ -1,24 +1,23 @@
 #include <gtest/gtest.h>
 
+#define Y_UNUSED(x) ((void) x);
+
+#if !defined(native_REALISATION) && (defined(clang) || !defined(think_cell_REALISATION))
+
 #include <functools.h>
 
 #include <vector>
 #include <set>
-
-#define Y_UNUSED(x) ((void) x);
-
-
-#if !defined(native_REALISATION)
 
 using namespace NFuncTools;
 
 class TestFunctools : public ::testing::Test
 {
 protected:
-	void SetUp() {
-	}
-	void TearDown() {
-	}
+    void SetUp() {
+    }
+    void TearDown() {
+    }
 };
 
 
@@ -777,6 +776,6 @@ TEST_F(TestFunctools, CopyIterator) {
 
 int main(int argc, char *argv[])
 {
-	::testing::InitGoogleTest(&argc, argv);
-	return RUN_ALL_TESTS();
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
